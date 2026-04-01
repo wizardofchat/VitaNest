@@ -10,20 +10,29 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.vitanest.app.ui.theme.VitaNestTheme
-
+import com.vitanest.app.data.repository.MockVitaClawRepository
 class MainActivity : ComponentActivity() {
+
+    private val vitaClawRepository = MockVitaClawRepository()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
-            VitaNestTheme {
+            MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
-                    NavHost(navController = navController, startDestination = "home") {
-                        composable("home") { HomeScreen(navController) }
+
+                    NavHost(
+                        navController = navController,
+                        startDestination = "home"
+                    ) {
+                        composable("home") {
+                            HomeScreen(navController, vitaClawRepository)
+                        }
                         composable("sicksense") { ComingSoonScreen("SickSense") }
                         composable("flow") { ComingSoonScreen("Flow") }
                         composable("soul") { ComingSoonScreen("Soul") }

@@ -1,98 +1,157 @@
 package com.vitanest.app
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessibilityNew
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Games
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Spa
-
-data class Module(
-    val name: String,
-    val route: String,
-    val icon: ImageVector,
-    val description: String
-)
-
-val modules = listOf(
-    Module("SickSense", "sicksense", Icons.Default.Favorite, "Health Insights"),
-    Module("Flow", "flow", Icons.Default.AccessibilityNew, "Yoga & Movement"),
-    Module("Soul", "soul", Icons.Default.Spa, "Spiritual Reflections"),
-    Module("Sky", "sky", Icons.Default.Cloud, "Weather & Nature"),
-    Module("PlayNest", "playnest", Icons.Default.Games, "Relaxing Games"),
-    Module("Council", "council", Icons.Default.Forum, "AI Council")
-)
+import com.vitanest.app.data.repository.VitaClawRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
-fun HomeScreen(navController: NavController) {
+
+fun HomeScreen(
+    navController: NavController,
+    repository: VitaClawRepository          // Removed default for now to avoid unresolved reference
+) {
+    var healthStatus by remember { mutableStateOf("Ready to connect") }
+    var askResult by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "VitaNest 🪹",
+            text = "VitaNest",
             style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold
+            color = MaterialTheme.colorScheme.primary
         )
-        Spacer(Modifier.height(8.dp))
+
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
-            "Your holistic daily companion",
+            text = "Intelligent Personal Assistant",
             style = MaterialTheme.typography.titleMedium
         )
 
-        Spacer(Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Test Buttons Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = {
+                    isLoading = true
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val result = repository.getHealth()
+                        withContext(Dispatchers.Main) {
+                            healthStatus = if (result.isSuccess) {
+                                "✅ Connected | Agentic Score: ${result.getOrNull()?.agenticScore}"
+                            } else {
+                                "❌ ${result.exceptionOrNull()?.message}"
+                            }
+                            isLoading = false
+                        }
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                enabled = !isLoading
+            ) {
+                Text("Test Health")
+            }
+
+            Button(
+                onClick = {
+                    isLoading = true
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val result = repository.askQuestion("What is your current status?")
+                        withContext(Dispatchers.Main) {
+                            askResult = if (result.isSuccess) {
+                                result.getOrNull()?.answer ?: "No answer"
+                            } else {
+                                "Error: ${result.exceptionOrNull()?.message}"
+                            }
+                            isLoading = false
+                        }
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                enabled = !isLoading
+            ) {
+                Text("Ask VitaClaw")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(text = healthStatus, style = MaterialTheme.typography.bodyLarge)
+
+        if (askResult.isNotEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Text(
+                    text = askResult,
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 5 Squares Grid (your preferred style)
+        Text(
+            text = "Features",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.align(Alignment.Start)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(modules) { module ->
-                ModuleTile(module = module) {
-                    navController.navigate(module.route)
-                }
-            }
+            item { FeatureCard("Council", "Multi-LLM discussion") { navController.navigate("council") } }
+            item { FeatureCard("SickSense", "Health monitoring") { navController.navigate("sicksense") } }
+            item { FeatureCard("Flow", "Daily planning") { navController.navigate("flow") } }
+            item { FeatureCard("Soul", "Personal growth") { navController.navigate("soul") } }
+            item { FeatureCard("Sky", "Market insights") { navController.navigate("sky") } }
+            item { FeatureCard("PlayNest", "Entertainment") { navController.navigate("playnest") } }
         }
     }
 }
 
 @Composable
-fun ModuleTile(module: Module, onClick: () -> Unit) {
-    Column(
+fun FeatureCard(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.large)
-            .clickable(onClick = onClick)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .height(120.dp)
     ) {
-        Icon(
-            imageVector = module.icon,
-            contentDescription = module.name,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(56.dp)
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(module.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(module.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = title, style = MaterialTheme.typography.titleMedium)
+            Text(text = subtitle, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
