@@ -11,9 +11,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.vitanest.app.data.repository.MockVitaClawRepository
+import com.vitanest.app.data.repository.VitaClawRepository
+
 class MainActivity : ComponentActivity() {
 
-    private val vitaClawRepository = MockVitaClawRepository()
+    private val vitaClawRepository = VitaClawRepository()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

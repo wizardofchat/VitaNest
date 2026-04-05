@@ -1,69 +1,62 @@
 package com.vitanest.app.data.remote
 
-import com.squareup.moshi.Json
-import com.squareup.moshi.JsonClass
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
-import retrofit2.http.Query
 
-// Data Models
-@JsonClass(generateAdapter = true)
+@Serializable
 data class HealthResponse(
     val status: String,
     val version: String,
     val uptime: String,
-    @Json(name = "agentic_score") val agenticScore: Int
+    @SerialName("agentic_score") val agenticScore: Int
 )
 
-@JsonClass(generateAdapter = true)
+@Serializable
 data class AskRequest(
     val query: String,
-    val context: String? = null
+    val context: String? = ""
 )
 
-@JsonClass(generateAdapter = true)
+@Serializable
 data class AskResponse(
     val answer: String,
-    val sources: List<String>? = null,
+    val sources: List<String>? = emptyList(),
     val sentiment: String? = null
 )
 
-@JsonClass(generateAdapter = true)
+@Serializable
 data class PortfolioResponse(
-    val total_value_gbp: Double,
+    @SerialName("total_value_gbp") val totalValueGbp: Double,
     val holdings: List<Holding>
 )
 
-@JsonClass(generateAdapter = true)
+@Serializable
 data class Holding(
     val ticker: String,
     val quantity: Double,
-    val value_gbp: Double
+    @SerialName("value_gbp") val valueGbp: Double
 )
 
-@JsonClass(generateAdapter = true)
+@Serializable
 data class BriefResponse(
     val summary: String,
-    val last_updated: String
+    @SerialName("last_updated") val lastUpdated: String
 )
 
-// Main API Service Interface
 interface VitaClawApiService {
-
-    @GET("/health")
+    @GET("health")
     suspend fun getHealth(): Response<HealthResponse>
 
-    @POST("/ask")
+    @POST("ask")
     suspend fun askQuestion(@Body request: AskRequest): Response<AskResponse>
 
-    @GET("/portfolio")
+    @GET("portfolio")
     suspend fun getPortfolio(): Response<PortfolioResponse>
 
-    @GET("/brief")
+    @GET("brief")
     suspend fun getBrief(): Response<BriefResponse>
-
-    @GET("/dividends")
-    suspend fun getDividends(@Query("ticker") ticker: String? = null): Response<List<String>>
 }
