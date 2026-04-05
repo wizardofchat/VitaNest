@@ -1,157 +1,248 @@
 package com.vitanest.app
 
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi // ADD THIS
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.staggeredgrid.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.vitanest.app.data.remote.BriefResponse
+import com.vitanest.app.data.remote.HealthResponse
+import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.repository.VitaClawRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.text.style.TextOverflow
 
+// CHANGE: Use the string name or ensure the import above is exact
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-
 fun HomeScreen(
     navController: NavController,
-    repository: VitaClawRepository          // Removed default for now to avoid unresolved reference
+    repository: VitaClawRepository
 ) {
-    var healthStatus by remember { mutableStateOf("Ready to connect") }
-    var askResult by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "VitaNest",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.primary
-        )
+    // 1. STATE DECLARATIONS
+    var briefData by remember { mutableStateOf<BriefResponse?>(null) }
+    var portfolioData by remember { mutableStateOf<PortfolioResponse?>(null) }
+    var agenticScore by remember { mutableIntStateOf(0) }
+    var isOnline by remember { mutableStateOf(false) }
 
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Intelligent Personal Assistant",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Test Buttons Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = {
-                    isLoading = true
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val result = repository.getHealth()
-                        withContext(Dispatchers.Main) {
-                            healthStatus = if (result.isSuccess) {
-                                "✅ Connected | Agentic Score: ${result.getOrNull()?.agenticScore}"
-                            } else {
-                                "❌ ${result.exceptionOrNull()?.message}"
-                            }
-                            isLoading = false
-                        }
-                    }
-                },
-                modifier = Modifier.weight(1f),
-                enabled = !isLoading
-            ) {
-                Text("Test Health")
-            }
-
-            Button(
-                onClick = {
-                    isLoading = true
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val result = repository.askQuestion("What is your current status?")
-                        withContext(Dispatchers.Main) {
-                            askResult = if (result.isSuccess) {
-                                result.getOrNull()?.answer ?: "No answer"
-                            } else {
-                                "Error: ${result.exceptionOrNull()?.message}"
-                            }
-                            isLoading = false
-                        }
-                    }
-                },
-                modifier = Modifier.weight(1f),
-                enabled = !isLoading
-            ) {
-                Text("Ask VitaClaw")
-            }
+    // 2. LOGIC BLOCK
+    LaunchedEffect(Unit) {
+        // Fetch Health
+        repository.getHealth().let { result ->
+            isOnline = result.isSuccess
+            agenticScore = result.getOrNull()?.agenticScore ?: 0
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(text = healthStatus, style = MaterialTheme.typography.bodyLarge)
-
-        if (askResult.isNotEmpty()) {
-            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Text(
-                    text = askResult,
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
+        // Fetch Brief
+        repository.getBrief().let { result ->
+            if (result.isSuccess) briefData = result.getOrNull()
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        // Fetch Portfolio
+        repository.getPortfolio().let { result ->
+            if (result.isSuccess) portfolioData = result.getOrNull()
+        }
+    }
 
-        // 5 Squares Grid (your preferred style)
-        Text(
-            text = "Features",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.align(Alignment.Start)
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    // 3. UI BLOCK
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("VitaNest", fontWeight = FontWeight.Bold) },
+                actions = { ConnectivityPulse(isOnline, agenticScore) }
+            )
+        }
+    ) { padding ->
+        LazyVerticalStaggeredGrid(
+            columns = StaggeredGridCells.Fixed(2),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp),
+            verticalItemSpacing = 16.dp,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item { FeatureCard("Council", "Multi-LLM discussion") { navController.navigate("council") } }
-            item { FeatureCard("SickSense", "Health monitoring") { navController.navigate("sicksense") } }
-            item { FeatureCard("Flow", "Daily planning") { navController.navigate("flow") } }
-            item { FeatureCard("Soul", "Personal growth") { navController.navigate("soul") } }
-            item { FeatureCard("Sky", "Market insights") { navController.navigate("sky") } }
-            item { FeatureCard("PlayNest", "Entertainment") { navController.navigate("playnest") } }
+            // Hero Card
+            item(span = StaggeredGridItemSpan.FullLine) {
+                MorningBriefHero(briefData)
+            }
+
+            // Portfolio Card
+            item(span = StaggeredGridItemSpan.FullLine) {
+                PortfolioCard(portfolioData)
+            }
+
+            // Grid Items
+            item { FeatureTile("Council", "AI Logic", Icons.Default.Groups) { navController.navigate("council") } }
+            item { FeatureTile("SickSense", "Health", Icons.Default.MedicalServices) { navController.navigate("sicksense") } }
+            item { FeatureTile("Flow", "Autonomy", Icons.Default.Refresh) { navController.navigate("flow") } }
+            item { FeatureTile("Soul", "Growth", Icons.Default.Favorite) { navController.navigate("soul") } }
+            item { FeatureTile("Sky", "Markets", Icons.Default.WbSunny) { navController.navigate("sky") } }
+            item { FeatureTile("Play", "Media", Icons.Default.PlayArrow) { navController.navigate("playnest") } }
         }
     }
 }
 
 @Composable
-fun FeatureCard(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
+fun MorningBriefHero(brief: BriefResponse?) {
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(), // Smoothly animates the resize
+        onClick = { isExpanded = !isExpanded },
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "MORNING BRIEF",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.5.sp
+                )
+
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (isExpanded) "Show less" else "Show more",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = brief?.summary ?: "Analysing your family's vitals...",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 22.sp,
+                // Condense logic: Show all lines if expanded, otherwise cap at 3
+                maxLines = if (isExpanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (!isExpanded && (brief?.summary?.length ?: 0) > 100) {
+                Text(
+                    text = "Tap to read more...",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun FeatureTile(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(120.dp)
+            .height(140.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall)
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column {
+                Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+fun ConnectivityPulse(isOnline: Boolean, score: Int) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse), label = "alpha"
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(end = 16.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.End) {
+            Text("SCORE", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
+            Text(score.toString(), fontWeight = FontWeight.Black, fontSize = 14.sp)
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .background(
+                    color = (if (isOnline) Color(0xFF00C853) else Color.Red).copy(alpha = if (isOnline) alpha else 1f),
+                    shape = CircleShape
+                )
+        )
+    }
+}
+
+@Composable
+fun PortfolioCard(portfolio: PortfolioResponse?) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(110.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("NET WORTH", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            val totalText = portfolio?.totalValueGbp?.let { "£%,.2f".format(it) } ?: "£0.00"
+            Text(
+                text = totalText,
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+
+            portfolio?.dailyPnLGbp?.let { pnl ->
+                val pnlText = "${if (pnl >= 0.0) "+" else ""}£%.2f".format(pnl)
+                Text(
+                    text = pnlText,
+                    color = if (pnl >= 0.0) Color.Green else Color.Red,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }
