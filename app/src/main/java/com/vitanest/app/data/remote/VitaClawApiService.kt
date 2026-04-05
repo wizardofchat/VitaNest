@@ -31,14 +31,16 @@ data class AskResponse(
 @Serializable
 data class PortfolioResponse(
     @SerialName("total_value_gbp") val totalValueGbp: Double,
-    val holdings: List<Holding>
+    val holdings: List<Holding>,
+    @SerialName("daily_pnl_gbp") val dailyPnLGbp: Double? = 0.0
 )
 
 @Serializable
 data class Holding(
     val ticker: String,
     val quantity: Double,
-    @SerialName("value_gbp") val valueGbp: Double
+    @SerialName("value_gbp") val valueGbp: Double,
+    @SerialName("pnl_gbp") val pnlGbp: Double? = 0.0
 )
 
 @Serializable
