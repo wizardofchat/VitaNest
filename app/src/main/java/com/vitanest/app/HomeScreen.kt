@@ -39,20 +39,40 @@ fun HomeScreen(
     var agenticScore by remember { mutableIntStateOf(0) }
     var isOnline by remember { mutableStateOf(false) }
 
+    // Pulse State for Health Tile
+    var pulseMetrics by remember { mutableStateOf(PulseMetrics()) }
+
     LaunchedEffect(Unit) {
+        // 1. Fetch health status and agentic score
         repository.getHealth().let { result ->
             isOnline = result.isSuccess
             agenticScore = result.getOrNull()?.agenticScore ?: 0
+            if (result.isFailure) {
+                android.util.Log.e("VitaNetDebug", "Health Fetch Failed: ${result.exceptionOrNull()?.message}")
+            }
         }
+
+        // 2. Fetch Morning Brief
         repository.getBrief().let { result ->
             if (result.isSuccess) briefData = result.getOrNull()
         }
+
+        // 3. Fetch Portfolio snapshot
         repository.getPortfolio().let { result ->
             if (result.isSuccess) portfolioData = result.getOrNull()
         }
+
+        // 4. FIX: Use 'askQuestion' and handle the AskResponse object
+        repository.askQuestion("strain today").let { result -> // Changed from askAgent
+            if (result.isSuccess) {
+                val rawResponse = result.getOrNull()?.answer ?: "" // Extract .answer
+                android.util.Log.d("PulseRawData", "RAW TEXT: $rawResponse") // ADD THIS
+                pulseMetrics = parsePulseResponse(rawResponse)
+            }
+        }
     }
 
-    // Subtle professional background gradient
+    // Professional background gradient
     Box(modifier = Modifier
         .fillMaxSize()
         .background(
@@ -85,9 +105,19 @@ fun HomeScreen(
                     PortfolioCard(portfolioData)
                 }
 
-                // Grid with high-polish tiles
-                item { FeatureTile("Council", "AI Logic", Icons.Default.Groups) { navController.navigate("council") } }
-                item { FeatureTile("SickSense", "Health", Icons.Default.MedicalServices) { navController.navigate("sicksense") } }
+                // High-polish feature grid
+                item {
+                    FeatureTile("Council", "Ask 5 minds", Icons.Default.Groups) {
+                        navController.navigate("council")
+                    }
+                }
+
+                item {
+                    PulseHomeTile(metrics = pulseMetrics) {
+                        navController.navigate("sicksense")
+                    }
+                }
+
                 item { FeatureTile("Flow", "Autonomy", Icons.Default.Refresh) { navController.navigate("flow") } }
                 item { FeatureTile("Soul", "Growth", Icons.Default.Favorite) { navController.navigate("soul") } }
                 item { FeatureTile("Sky", "Markets", Icons.Default.WbSunny) { navController.navigate("sky") } }
@@ -105,7 +135,7 @@ fun MorningBriefHero(brief: BriefResponse?) {
         onClick = { isExpanded = !isExpanded },
         modifier = Modifier.fillMaxWidth().animateContentSize(),
         shape = RoundedCornerShape(32.dp),
-        color = Color(0xFFEBEBFF), // Premium soft blue/lavender
+        color = Color(0xFFEBEBFF), // Lavender per brief
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.6f))
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
@@ -145,7 +175,7 @@ fun PortfolioCard(portfolio: PortfolioResponse?) {
     Surface(
         modifier = Modifier.fillMaxWidth().height(120.dp),
         shape = RoundedCornerShape(32.dp),
-        color = Color(0xFF1A1A1E), // Deep Obsidian
+        color = Color(0xFF1A1A1E), // Obsidian
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
     ) {
         Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
@@ -168,7 +198,32 @@ fun PortfolioCard(portfolio: PortfolioResponse?) {
 }
 
 @Composable
-fun FeatureTile(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
+fun PulseHomeTile(metrics: PulseMetrics, onClick: () -> Unit) {
+    val recoveryColor = when {
+        metrics.recovery >= 67f -> Color(0xFF639922) // Green
+        metrics.recovery >= 34f -> Color(0xFFEF9F27) // Amber
+        else -> Color(0xFFE24B4A) // Red alert
+    }
+
+    FeatureTile(
+        title = "Pulse",
+        subtitle = "Recovery ${metrics.recovery.toInt()}%",
+        subtitleColor = recoveryColor,
+        secondarySubtitle = "Strain ${metrics.strain} • Sleep ${metrics.sleepPerformance.toInt()}%",
+        icon = Icons.Default.MedicalServices,
+        onClick = onClick
+    )
+}
+
+@Composable
+fun FeatureTile(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    subtitleColor: Color = Color.Gray,
+    secondarySubtitle: String? = null,
+    onClick: () -> Unit
+) {
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().height(160.dp),
@@ -185,7 +240,10 @@ fun FeatureTile(title: String, subtitle: String, icon: ImageVector, onClick: () 
             }
             Column {
                 Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(text = subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                Text(text = subtitle, style = MaterialTheme.typography.labelSmall, color = subtitleColor)
+                if (secondarySubtitle != null) {
+                    Text(text = secondarySubtitle, style = MaterialTheme.typography.labelSmall, color = Color(0xFF888780))
+                }
             }
         }
     }
