@@ -7,6 +7,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 
+
 @Serializable
 data class HealthResponse(
     val status: String,
@@ -28,19 +29,24 @@ data class AskResponse(
     val sentiment: String? = null
 )
 
+// Inside VitaClawApiService.kt
+
 @Serializable
 data class PortfolioResponse(
     @SerialName("total_value_gbp") val totalValueGbp: Double,
-    val holdings: List<Holding>,
-    @SerialName("daily_pnl_gbp") val dailyPnLGbp: Double? = 0.0
+    @SerialName("daily_pnl_gbp") val dailyPnLGbp: Double? = 0.0,
+    @SerialName("holdings") val positions: List<Position> = emptyList()
+    // This tells the app: "Look for 'holdings' in JSON, but call it 'positions' in code"
 )
 
 @Serializable
-data class Holding(
+data class Position(
     val ticker: String,
-    val quantity: Double,
-    @SerialName("value_gbp") val valueGbp: Double,
-    @SerialName("pnl_gbp") val pnlGbp: Double? = 0.0
+    val name: String = "",
+    @SerialName("value_gbp") val marketValue: Double,
+    // Maps 'value_gbp' from your curl to 'marketValue' used in PortfolioDetailScreen
+    @SerialName("pnl_gbp") val pnlPercent: Double = 0.0
+    // Maps 'pnl_gbp' to the second column in your UI
 )
 
 @Serializable

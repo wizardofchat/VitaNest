@@ -115,11 +115,10 @@ fun HomeScreen(
                     }
                 }
 
-                // 3. FINANCE TILE (Repurposed Flow)
+// 3. FINANCE TILE
                 item {
                     val total = portfolioData?.totalValueGbp?.let { "£%,.0f".format(it) } ?: "£0"
                     val pnlGbp = portfolioData?.dailyPnLGbp ?: 0.0
-                    // Calculate P&L % if available in your response, otherwise use GBP
                     val pnlText = " (£${String.format("%.2f", pnlGbp)})"
 
                     FeatureTile(
@@ -127,11 +126,12 @@ fun HomeScreen(
                         subtitle = total,
                         secondarySubtitle = pnlText,
                         subtitleColor = Color.Black,
-                        // Green if positive, Red if negative
-                        icon = Icons.Default.AccountBalanceWallet
-                    ) {
-                        navController.navigate("portfolio_detail")
-                    }
+                        icon = Icons.Default.AccountBalanceWallet,
+                        onClick = {
+                            android.util.Log.d("VITA_DEBUG", "Finance tile clicked! Navigating to portfolio_detail")
+                            navController.navigate("portfolio_detail")
+                        }
+                    )
                 }
 
                 // 4. DIVIDENDS TILE (New)

@@ -4,7 +4,7 @@ import com.vitanest.app.data.remote.AskResponse
 import com.vitanest.app.data.remote.BriefResponse
 import com.vitanest.app.data.remote.HealthResponse
 import com.vitanest.app.data.remote.PortfolioResponse
-import com.vitanest.app.data.remote.Holding
+import com.vitanest.app.data.remote.Position
 
 class MockVitaClawRepository : VitaClawRepository() {
 
@@ -29,13 +29,16 @@ class MockVitaClawRepository : VitaClawRepository() {
         )
     }
 
+// Inside MockVitaClawRepository.kt
+
     override suspend fun getPortfolio(): Result<PortfolioResponse> {
         return Result.success(
             PortfolioResponse(
-                totalValueGbp = 12485.75, // Updated parameter name
-                holdings = listOf(
-                    Holding("AAPL", 12.5, 2450.0),
-                    Holding("NVDA", 8.0, 3120.0)
+                totalValueGbp = 13462.04,
+                dailyPnLGbp = 505.28,
+                positions = listOf( // Matches the 'positions' variable name above
+                    Position("SGLN", "Gold ETC", 1040.88, 120.83),
+                    Position("VHYL", "Vanguard All-World", 793.2, 74.6)
                 )
             )
         )

@@ -46,7 +46,12 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         }
-
+                        composable("portfolio_detail") {
+                            PortfolioDetailScreen(
+                                navController = navController,
+                                repository = vitaClawRepository
+                            )
+                        }
                         composable("council") {
                             ComingSoonScreen(onBack = { navController.popBackStack() })
                         }
