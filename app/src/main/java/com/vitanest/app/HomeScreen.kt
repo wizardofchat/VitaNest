@@ -101,26 +101,58 @@ fun HomeScreen(
                     MorningBriefHero(briefData)
                 }
 
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    PortfolioCard(portfolioData)
-                }
-
-                // High-polish feature grid
+                // 1. Council Tile
                 item {
                     FeatureTile("Council", "Ask 5 minds", Icons.Default.Groups) {
                         navController.navigate("council")
                     }
                 }
 
+                // 2. Pulse Tile (Health)
                 item {
                     PulseHomeTile(metrics = pulseMetrics) {
                         navController.navigate("sicksense")
                     }
                 }
 
-                item { FeatureTile("Flow", "Autonomy", Icons.Default.Refresh) { navController.navigate("flow") } }
+                // 3. FINANCE TILE (Repurposed Flow)
+                item {
+                    val total = portfolioData?.totalValueGbp?.let { "£%,.0f".format(it) } ?: "£0"
+                    val pnlGbp = portfolioData?.dailyPnLGbp ?: 0.0
+                    // Calculate P&L % if available in your response, otherwise use GBP
+                    val pnlText = " (£${String.format("%.2f", pnlGbp)})"
+
+                    FeatureTile(
+                        title = "Finance",
+                        subtitle = total,
+                        secondarySubtitle = pnlText,
+                        subtitleColor = Color.Black,
+                        // Green if positive, Red if negative
+                        icon = Icons.Default.AccountBalanceWallet
+                    ) {
+                        navController.navigate("portfolio_detail")
+                    }
+                }
+
+                // 4. DIVIDENDS TILE (New)
+                item {
+                    // This will eventually pull from repository.askQuestion("monthly income")
+                    FeatureTile(
+                        title = "Dividends",
+                        subtitle = "£14.17 Apr", // Dynamic placeholder
+                        secondarySubtitle = "£61 to target", // Based on £75 target
+                        subtitleColor = Color(0xFFBA7517), // Gold/Orange for income
+                        icon = Icons.Default.TrendingUp
+                    ) {
+                        navController.navigate("income_detail")
+                    }
+                }
+
+                // 5. Soul & Sky (Keeping the grid balanced)
                 item { FeatureTile("Soul", "Growth", Icons.Default.Favorite) { navController.navigate("soul") } }
                 item { FeatureTile("Sky", "Markets", Icons.Default.WbSunny) { navController.navigate("sky") } }
+
+                // 6. Play & Flow (Optional: remove if grid is full)
                 item { FeatureTile("Play", "Media", Icons.Default.PlayArrow) { navController.navigate("playnest") } }
             }
         }
