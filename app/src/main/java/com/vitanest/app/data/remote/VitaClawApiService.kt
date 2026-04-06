@@ -7,7 +7,6 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 
-
 @Serializable
 data class HealthResponse(
     val status: String,
@@ -29,14 +28,11 @@ data class AskResponse(
     val sentiment: String? = null
 )
 
-// Inside VitaClawApiService.kt
-
 @Serializable
 data class PortfolioResponse(
     @SerialName("total_value_gbp") val totalValueGbp: Double,
     @SerialName("daily_pnl_gbp") val dailyPnLGbp: Double? = 0.0,
     @SerialName("holdings") val positions: List<Position> = emptyList()
-    // This tells the app: "Look for 'holdings' in JSON, but call it 'positions' in code"
 )
 
 @Serializable
@@ -44,9 +40,31 @@ data class Position(
     val ticker: String,
     val name: String = "",
     @SerialName("value_gbp") val marketValue: Double,
-    // Maps 'value_gbp' from your curl to 'marketValue' used in PortfolioDetailScreen
     @SerialName("pnl_gbp") val pnlPercent: Double = 0.0
-    // Maps 'pnl_gbp' to the second column in your UI
+)
+
+@Serializable
+data class PiesResponse(
+    @SerialName("total_value_gbp") val totalValueGbp: Double,
+    @SerialName("total_pnl_gbp") val totalPnlGbp: Double,
+    @SerialName("total_cash_gbp") val totalCashGbp: Double,
+    @SerialName("fetched_at") val fetchedAt: String = "",
+    val pies: List<PieItem> = emptyList()
+)
+
+@Serializable
+data class PieItem(
+    val id: Int? = null,
+    val name: String,
+    @SerialName("value_gbp") val valueGbp: Double,
+    @SerialName("pnl_gbp") val pnlGbp: Double,
+    @SerialName("pnl_pct") val pnlPct: Double,
+    @SerialName("cash_gbp") val cashGbp: Double,
+    @SerialName("weight_pct") val weightPct: Double,
+    @SerialName("holdings_count") val holdingsCount: Int,
+    val status: String? = null,
+    @SerialName("dividends_gained_gbp") val dividendsGainedGbp: Double = 0.0,
+    val tickers: List<String> = emptyList()
 )
 
 @Serializable
@@ -64,6 +82,9 @@ interface VitaClawApiService {
 
     @GET("portfolio")
     suspend fun getPortfolio(): Response<PortfolioResponse>
+
+    @GET("portfolio/pies")
+    suspend fun getPortfolioPies(): Response<PiesResponse>
 
     @GET("brief")
     suspend fun getBrief(): Response<BriefResponse>
