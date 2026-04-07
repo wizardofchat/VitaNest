@@ -1,5 +1,8 @@
 package com.vitanest.app
 
+// © 2026 Sumeet Garg — VitaNest
+// PortfolioDetailScreen — e-ink monochrome · Kindle editorial · locked 2026-04-06 ☘️
+
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -7,17 +10,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -29,23 +29,7 @@ import androidx.navigation.NavController
 import com.vitanest.app.data.remote.PieItem
 import com.vitanest.app.data.remote.PiesResponse
 import com.vitanest.app.data.repository.VitaClawRepository
-
-// Colour palette — one per pie, matches Gemini handoff spec
-private val PIE_COLORS = listOf(
-    Color(0xFF1D9E75), // ETF
-    Color(0xFF534AB7), // Whole
-    Color(0xFFBA7517), // Inv Trust
-    Color(0xFF185FA5), // SiddhiPie
-    Color(0xFF993C1D), // Dhanteras
-    Color(0xFF3C3489), // InnovETF
-    Color(0xFF0F6E56), // Monthly
-    Color(0xFF712B13), // REIT
-    Color(0xFF444441), // SectorETF
-    Color(0xFFD4537E), // Monv1
-    Color(0xFF378ADD), // MonthlyAgg
-    Color(0xFF639922), // Renewables
-    Color(0xFF888780), // VitaWatch
-)
+import com.vitanest.app.ui.theme.VitaNestTheme as T
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,10 +37,10 @@ fun PortfolioDetailScreen(
     navController: NavController,
     repository: VitaClawRepository
 ) {
-    var piesData by remember { mutableStateOf<PiesResponse?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
+    var piesData         by remember { mutableStateOf<PiesResponse?>(null) }
+    var isLoading        by remember { mutableStateOf(true) }
     var selectedPieIndex by remember { mutableIntStateOf(-1) }
-    var showAllPies by remember { mutableStateOf(false) }
+    var showAllPies      by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         repository.getPortfolioPies().let { result ->
@@ -65,88 +49,117 @@ fun PortfolioDetailScreen(
         }
     }
 
-    Scaffold(
-        containerColor = Color(0xFF121212),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Portfolio", color = Color.White, fontWeight = FontWeight.Bold)
-                        piesData?.fetchedAt?.let {
-                            Text(it, color = Color(0xFF666666), fontSize = 10.sp)
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-            )
-        }
-    ) { padding ->
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(T.Paper)
+    ) {
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color(0xFF1D9E75))
+                CircularProgressIndicator(color = T.Ink, strokeWidth = 2.dp)
             }
-            return@Scaffold
+            return@Box
         }
 
-        val pies = piesData?.pies ?: emptyList()
+        val pies        = piesData?.pies ?: emptyList()
         val visiblePies = if (showAllPies) pies else pies.take(5)
 
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = T.screenPadding)
         ) {
-            // Hero numbers
+
+            // ── Header ────────────────────────────────────────
             item {
-                Column(modifier = Modifier.padding(top = 16.dp, bottom = 20.dp)) {
-                    Text("TOTAL VALUE", color = Color(0xFF666666), fontSize = 10.sp, letterSpacing = 1.sp)
-                    Text(
-                        text = piesData?.totalValueGbp?.let { "£%,.2f".format(it) } ?: "£0.00",
-                        color = Color.White,
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    piesData?.totalPnlGbp?.let { pnl ->
-                        Text(
-                            text = "${if (pnl >= 0) "+" else ""}£%.2f".format(pnl),
-                            color = if (pnl >= 0) Color(0xFF4CAF50) else Color(0xFFF44336),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                Spacer(modifier = Modifier.height(52.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = T.Ink,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "← Back",
+                            style = T.meta
+                        )
+                        Text(
+                            text = "PORTFOLIO",
+                            style = T.sectionHead
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    piesData?.fetchedAt?.let {
+                        Text(text = it, style = T.meta)
+                    }
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
+                Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
-            // Stats row
+            // ── Hero numbers ──────────────────────────────────
+            item {
+                Text(
+                    text = piesData?.totalValueGbp?.let { "£%,.0f".format(it) } ?: "£0",
+                    fontFamily = T.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 40.sp,
+                    color = T.Ink
+                )
+                val pnl    = piesData?.totalPnlGbp ?: 0.0
+                val pnlStr = "${if (pnl >= 0) "+" else ""}£%.2f".format(pnl)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(text = pnlStr, style = T.meta)
+                    Text(text = "·", style = T.meta)
+                    Text(
+                        text = "${if (pnl >= 0) "+" else ""}${"%.1f".format(
+                            if ((piesData?.totalValueGbp ?: 0.0) > 0)
+                                pnl / (piesData!!.totalValueGbp - pnl) * 100 else 0.0
+                        )}%",
+                        style = T.meta
+                    )
+                }
+                Spacer(modifier = Modifier.height(T.sectionGap))
+            }
+
+            // ── Stats row — ink stamps ─────────────────────────
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = T.sectionGap),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    StatMiniCard("Pies", pies.size.toString(), Modifier.weight(1f))
-                    StatMiniCard(
-                        "Holdings",
-                        pies.sumOf { it.holdingsCount }.toString(),
-                        Modifier.weight(1f)
+                    InkStatBlock(
+                        label = "PIES",
+                        value = pies.size.toString(),
+                        modifier = Modifier.weight(1f)
                     )
-                    StatMiniCard(
-                        "Dividends",
-                        "£%.0f".format(pies.sumOf { it.dividendsGainedGbp }),
-                        Modifier.weight(1f),
-                        valueColor = Color(0xFF4CAF50)
+                    InkStatBlock(
+                        label = "HOLDINGS",
+                        value = pies.sumOf { it.holdingsCount }.toString(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    InkStatBlock(
+                        label = "DIVIDENDS",
+                        value = "£%.0f".format(pies.sumOf { it.dividendsGainedGbp }),
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
 
-            // Donut chart
+            // ── Greyscale donut ───────────────────────────────
             item {
-                DonutChart(
+                InkDonutChart(
                     pies = pies,
                     selectedIndex = selectedPieIndex,
                     onSegmentClick = { idx ->
@@ -155,33 +168,33 @@ fun PortfolioDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(220.dp)
-                        .padding(bottom = 8.dp)
                 )
-            }
-
-            item {
                 Text(
-                    "tap segment to filter · ${pies.size} pies",
-                    color = Color(0xFF555555),
-                    fontSize = 10.sp,
-                    modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(bottom = 16.dp)
+                    text = "tap to filter · ${pies.size} pies",
+                    style = T.meta,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentWidth(Alignment.CenterHorizontally)
+                        .padding(vertical = 8.dp)
                 )
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // Pie list
+            // ── Pie list — left ink bars ───────────────────────
             itemsIndexed(visiblePies) { index, pie ->
-                val isSelected = selectedPieIndex == index || selectedPieIndex == -1
-                PieRow(
+                val isHighlighted = selectedPieIndex == index || selectedPieIndex == -1
+                InkPieRow(
                     pie = pie,
-                    color = PIE_COLORS.getOrElse(index) { Color.Gray },
-                    isHighlighted = isSelected,
+                    inkWeight = T.inkRampColor(index),
+                    isHighlighted = isHighlighted,
                     onClick = {
                         selectedPieIndex = if (selectedPieIndex == index) -1 else index
                     }
                 )
             }
 
-            // Show more / less toggle
+            // ── Show more / less ──────────────────────────────
             if (pies.size > 5) {
                 item {
                     Row(
@@ -194,49 +207,50 @@ fun PortfolioDetailScreen(
                     ) {
                         Text(
                             text = if (showAllPies) "Show less" else "+ ${pies.size - 5} more pies",
-                            color = Color(0xFF888780),
-                            fontSize = 12.sp
+                            style = T.meta
                         )
                         Icon(
                             imageVector = if (showAllPies) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                             contentDescription = null,
-                            tint = Color(0xFF888780),
-                            modifier = Modifier.size(16.dp)
+                            tint = T.Muted,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
+                    HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
                 }
             }
 
-            // Cash footer
+            // ── Cash footer ───────────────────────────────────
             item {
-                Spacer(Modifier.height(16.dp))
-                Surface(
+                Spacer(modifier = Modifier.height(T.sectionGap))
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF1A1A1A)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Cash across all pies", color = Color(0xFF888780), fontSize = 13.sp)
-                        Text(
-                            text = "£%.2f".format(piesData?.totalCashGbp ?: 0.0),
-                            color = Color(0xFFFAC775),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                    }
+                    Text(text = "Cash across all pies", style = T.meta)
+                    Text(
+                        text = "£%.2f".format(piesData?.totalCashGbp ?: 0.0),
+                        fontFamily = T.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = T.Ink
+                    )
                 }
-                Spacer(Modifier.height(32.dp))
+                HorizontalDivider(
+                    thickness = T.ruleThickness,
+                    color = T.Rule,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                Spacer(modifier = Modifier.height(80.dp))
             }
         }
     }
 }
 
+// ── Greyscale donut chart ─────────────────────────────────────
 @Composable
-fun DonutChart(
+fun InkDonutChart(
     pies: List<PieItem>,
     selectedIndex: Int,
     onSegmentClick: (Int) -> Unit,
@@ -252,7 +266,7 @@ fun DonutChart(
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 52.dp.toPx()
+            val strokeWidth = 48.dp.toPx()
             val diameter = minOf(size.width, size.height) - strokeWidth
             val topLeft = Offset(
                 (size.width - diameter) / 2f,
@@ -262,50 +276,73 @@ fun DonutChart(
             var startAngle = -90f
 
             pies.forEachIndexed { index, pie ->
-                val sweep = (pie.weightPct.toFloat() / 100f) * 360f * animProgress
-                val color = PIE_COLORS.getOrElse(index) { Color.Gray }
-                val isSelected = selectedIndex == index
-                val alpha = when {
-                    selectedIndex == -1 -> 1f
-                    isSelected -> 1f
-                    else -> 0.3f
+                val sweep    = (pie.weightPct.toFloat() / 100f) * 360f * animProgress
+                val inkColor = T.inkRampColor(index)
+                val alpha    = when {
+                    selectedIndex == -1   -> 1f
+                    selectedIndex == index -> 1f
+                    else                  -> 0.25f
                 }
                 drawArc(
-                    color = color.copy(alpha = alpha),
+                    color      = inkColor.copy(alpha = alpha),
                     startAngle = startAngle,
-                    sweepAngle = sweep - 1f, // 1dp gap between segments
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = strokeWidth)
+                    sweepAngle = sweep - 1f,
+                    useCenter  = false,
+                    topLeft    = topLeft,
+                    size       = arcSize,
+                    style      = Stroke(width = strokeWidth)
                 )
                 startAngle += sweep
             }
         }
 
-        // Centre text
+        // Centre label
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             if (selectedIndex >= 0 && selectedIndex < pies.size) {
                 val selected = pies[selectedIndex]
-                Text(selected.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Text("£%,.0f".format(selected.valueGbp), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                Text("%.1f%%".format(selected.weightPct), color = Color(0xFF888780), fontSize = 11.sp)
+                Text(
+                    text = selected.name,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
+                    color = T.Ink
+                )
+                Text(
+                    text = "£%,.0f".format(selected.valueGbp),
+                    fontFamily = T.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = T.Ink
+                )
+                Text(
+                    text = "%.1f%%".format(selected.weightPct),
+                    style = T.meta
+                )
             } else {
-                Text("£%,.0f".format(pies.sumOf { it.valueGbp }), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                Text("${pies.size} pies", color = Color(0xFF666666), fontSize = 11.sp)
+                Text(
+                    text = "£%,.0f".format(pies.sumOf { it.valueGbp }),
+                    fontFamily = T.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = T.Ink
+                )
+                Text(
+                    text = "${pies.size} pies",
+                    style = T.meta
+                )
             }
         }
     }
 }
 
+// ── Pie row — left ink bar replaces coloured dot ──────────────
 @Composable
-fun PieRow(
+fun InkPieRow(
     pie: PieItem,
-    color: Color,
+    inkWeight: Color,
     isHighlighted: Boolean,
     onClick: () -> Unit
 ) {
-    val alpha = if (isHighlighted) 1f else 0.4f
+    val contentAlpha = if (isHighlighted) 1f else 0.35f
 
     Row(
         modifier = Modifier
@@ -315,82 +352,83 @@ fun PieRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(color.copy(alpha = alpha))
+        // Left ink bar — width 3dp, height scales with row
+        Box(
+            modifier = Modifier
+                .width(T.leftBarWidth)
+                .height(36.dp)
+                .background(inkWeight.copy(alpha = contentAlpha))
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // Pie info
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = pie.name,
+                style = T.bodyValue.copy(color = T.Ink.copy(alpha = contentAlpha))
             )
-            Spacer(Modifier.width(10.dp))
-            Column {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    pie.name,
-                    color = Color.White.copy(alpha = alpha),
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp
+                    text = "%.1f%%".format(pie.weightPct),
+                    style = T.meta.copy(color = T.Muted.copy(alpha = contentAlpha))
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (pie.holdingsCount > 0) {
                     Text(
-                        "%.1f%%".format(pie.weightPct),
-                        color = Color(0xFF888780).copy(alpha = alpha),
-                        fontSize = 10.sp
+                        text = "· ${pie.holdingsCount} holdings",
+                        style = T.meta.copy(color = T.Muted.copy(alpha = contentAlpha))
                     )
-                    if (pie.holdingsCount > 0) {
-                        Text(
-                            "· ${pie.holdingsCount} holdings",
-                            color = Color(0xFF888780).copy(alpha = alpha),
-                            fontSize = 10.sp
-                        )
-                    }
-                    pie.status?.let {
-                        Text(
-                            "· $it",
-                            color = if (it == "AHEAD") Color(0xFF4CAF50).copy(alpha = alpha)
-                            else Color(0xFF888780).copy(alpha = alpha),
-                            fontSize = 10.sp
-                        )
-                    }
                 }
-                // Tickers sub-row
-                if (pie.tickers.isNotEmpty()) {
+                pie.status?.let { status ->
                     Text(
-                        pie.tickers.joinToString(" · "),
-                        color = Color(0xFF555555).copy(alpha = alpha),
-                        fontSize = 9.sp,
-                        modifier = Modifier.padding(top = 2.dp)
+                        text = "· $status",
+                        style = T.meta.copy(color = T.Muted.copy(alpha = contentAlpha))
                     )
                 }
             }
+            if (pie.tickers.isNotEmpty()) {
+                Text(
+                    text = pie.tickers.joinToString(" · "),
+                    style = T.meta.copy(
+                        fontSize = 9.sp,
+                        color = T.Muted.copy(alpha = contentAlpha)
+                    ),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
         }
+
+        // Value + P&L — monochrome, sign-only colour distinction removed
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                "£%,.0f".format(pie.valueGbp),
-                color = Color.White.copy(alpha = alpha),
-                fontWeight = FontWeight.Medium,
-                fontSize = 13.sp
+                text = "£%,.0f".format(pie.valueGbp),
+                style = T.bodyValue.copy(color = T.Ink.copy(alpha = contentAlpha))
             )
             Text(
-                "${if (pie.pnlPct >= 0) "+" else ""}%.2f%%".format(pie.pnlPct),
-                color = (if (pie.pnlPct >= 0) Color(0xFF4CAF50) else Color(0xFFF44336)).copy(alpha = alpha),
-                fontSize = 11.sp
+                text = "${if (pie.pnlPct >= 0) "+" else ""}%.2f%%".format(pie.pnlPct),
+                style = T.meta.copy(color = T.Muted.copy(alpha = contentAlpha))
             )
         }
     }
-    Divider(color = Color(0xFF1E1E1E), thickness = 0.5.dp)
+    HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }
 
+// ── Ink stat block ────────────────────────────────────────────
 @Composable
-fun StatMiniCard(label: String, value: String, modifier: Modifier = Modifier, valueColor: Color = Color.White) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF1A1A1A)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(label, color = Color(0xFF666666), fontSize = 9.sp, letterSpacing = 0.5.sp)
-            Spacer(Modifier.height(4.dp))
-            Text(value, color = valueColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        }
+fun InkStatBlock(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        Text(text = label, style = T.sectionHead)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value,
+            fontFamily = T.Serif,
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            color = T.Ink
+        )
+        HorizontalDivider(
+            thickness = T.ruleThickness,
+            color = T.Rule,
+            modifier = Modifier.padding(top = 6.dp)
+        )
     }
 }

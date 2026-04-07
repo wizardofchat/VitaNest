@@ -1,9 +1,10 @@
 package com.vitanest.app
 
+// © 2026 Sumeet Garg — VitaNest
+// PulseDetailScreen — e-ink monochrome · Kindle editorial · locked 2026-04-06 ☘️
+
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -13,12 +14,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vitanest.app.data.repository.VitaClawRepository
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TopAppBar // Use TopAppBar, not SmallTopAppBar
+import com.vitanest.app.ui.theme.VitaNestTheme as T
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,196 +30,300 @@ fun PulseDetailScreen(
     var metrics by remember { mutableStateOf(PulseMetrics()) }
 
     LaunchedEffect(Unit) {
-        // Fix: Use 'askQuestion' as per your VitaClawRepository.kt
         repository.askQuestion("strain today").let { result ->
             if (result.isSuccess) {
-                // Fix: Extract .answer from the AskResponse object
                 val rawText = result.getOrNull()?.answer ?: ""
                 metrics = parsePulseResponse(rawText)
             }
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar( // CenterAlignedTopAppBar also works for 'Sundar-level' polish
-                title = { Text("Pulse • Today", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                }
-            )
-        }
-    ) { padding ->
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(T.Paper)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .background(Color(0xFFF8F9FA))
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp)
+                .padding(horizontal = T.screenPadding)
         ) {
-            // Section 1: Recovery Ring & Primary Metrics
-            Surface(
+            // ── Header ────────────────────────────────────────
+            Spacer(modifier = Modifier.height(52.dp))
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                color = Color.White,
-                shadowElevation = 2.dp
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(24.dp)
                 ) {
-                    RecoveryRing(percentage = metrics.recovery)
-                    Spacer(modifier = Modifier.width(32.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MetricRow("HRV", "${metrics.hrv} ms")
-                        MetricRow("RHR", "${metrics.rhr.toInt()} bpm")
-                        MetricRow("SpO2", "${metrics.spo2}%")
-                        MetricRow("Skin temp", "${metrics.skinTemp}°C")
-                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = T.Ink,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Pulse · Today",
+                    fontFamily = T.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = T.Ink
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
+            Spacer(modifier = Modifier.height(T.sectionGap))
+
+            // ── Recovery ring + primary metrics ───────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Recovery ring — ONE colour exception
+                InkRecoveryRing(percentage = metrics.recovery)
+
+                Spacer(modifier = Modifier.width(32.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    InkMetricRow("HRV",       "${metrics.hrv} ms")
+                    InkMetricRow("RHR",       "${metrics.rhr.toInt()} bpm")
+                    InkMetricRow("SpO2",      "${"%.1f".format(metrics.spo2)}%")
+                    InkMetricRow("Skin temp", "${metrics.skinTemp}°C")
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(T.sectionGap))
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            Spacer(modifier = Modifier.height(T.sectionGap))
 
-            // Section 2: Activity & Sleep
-            Text("ACTIVITY & SLEEP", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+            // ── Activity & Sleep ──────────────────────────────
+            Text(text = "ACTIVITY & SLEEP", style = T.sectionHead)
             Spacer(modifier = Modifier.height(16.dp))
 
-            StrainGauge(currentStrain = metrics.strain)
+            // Strain gauge — ink bar
+            InkBarRow(
+                label = "Day strain",
+                value = "${metrics.strain} / 21",
+                fraction = (metrics.strain / 21f).coerceIn(0f, 1f)
+            )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            PerformanceBar("Sleep Performance", metrics.sleepPerformance, Color(0xFF534AB7))
-            PerformanceBar("Sleep Efficiency", metrics.sleepEfficiency, Color(0xFF639922))
+            InkBarRow(
+                label = "Sleep performance",
+                value = "${metrics.sleepPerformance.toInt()}%",
+                fraction = (metrics.sleepPerformance / 100f).coerceIn(0f, 1f)
+            )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Sleep Detail Chips (Fix #1: Disturbances)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SleepChip("${metrics.remMin.toInt()}", "REM min", Modifier.weight(1f))
-                SleepChip("${metrics.deepMin.toInt()}", "Deep min", Modifier.weight(1f))
-                SleepChip("${metrics.disturbances}", "Disturbances", Modifier.weight(1f))
+            InkBarRow(
+                label = "Sleep efficiency",
+                value = "${metrics.sleepEfficiency.toInt()}%",
+                fraction = (metrics.sleepEfficiency / 100f).coerceIn(0f, 1f)
+            )
+
+            Spacer(modifier = Modifier.height(T.sectionGap))
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            Spacer(modifier = Modifier.height(T.sectionGap))
+
+            // ── Sleep detail — three ink columns ─────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                InkSleepStat(
+                    value = "${metrics.remMin.toInt()}",
+                    label = "REM min",
+                    modifier = Modifier.weight(1f)
+                )
+                // Vertical rule
+                Box(
+                    modifier = Modifier
+                        .width(T.ruleThickness)
+                        .height(48.dp)
+                        .background(T.Rule)
+                        .align(Alignment.CenterVertically)
+                )
+                InkSleepStat(
+                    value = "${metrics.deepMin.toInt()}",
+                    label = "Deep min",
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .width(T.ruleThickness)
+                        .height(48.dp)
+                        .background(T.Rule)
+                        .align(Alignment.CenterVertically)
+                )
+                InkSleepStat(
+                    value = "${metrics.disturbances}",
+                    label = "Disturbances",
+                    modifier = Modifier.weight(1f)
+                )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(T.sectionGap))
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            Spacer(modifier = Modifier.height(T.sectionGap))
 
-            // Section 3: Last Workout (Fix #2: Date format)
-            WorkoutCard(metrics.lastWorkout)
+            // ── Last workout ──────────────────────────────────
+            Text(text = "LAST WORKOUT", style = T.sectionHead)
+            Spacer(modifier = Modifier.height(12.dp))
+            InkWorkoutRow(metrics.lastWorkout)
+
+            Spacer(modifier = Modifier.height(80.dp))
         }
     }
 }
 
-// ... Custom UI components (RecoveryRing, StrainGauge, etc.) stay the same ...
+// ── Recovery ring — one colour exception ─────────────────────
 @Composable
-fun RecoveryRing(percentage: Float) {
-    val color = when {
-        percentage >= 67f -> Color(0xFF639922)
-        percentage >= 34f -> Color(0xFFEF9F27)
-        else -> Color(0xFFE24B4A)
-    }
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(120.dp)) {
+fun InkRecoveryRing(percentage: Float) {
+    val ringColor = T.recoveryColor(percentage)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.size(110.dp)
+    ) {
         Canvas(modifier = Modifier.size(100.dp)) {
-            drawCircle(color = color.copy(alpha = 0.1f), style = Stroke(width = 10.dp.toPx()))
+            // Track — light rule
+            drawCircle(
+                color = Color(0xFFC8C4BB),
+                style = Stroke(width = 8.dp.toPx())
+            )
+            // Arc — recovery colour
             drawArc(
-                color = color,
+                color = ringColor,
                 startAngle = -90f,
                 sweepAngle = (percentage / 100f) * 360f,
                 useCenter = false,
-                style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
+                style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
             )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("${percentage.toInt()}%", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text("Recovery", fontSize = 10.sp, color = Color.Gray)
+            Text(
+                text = "${percentage.toInt()}%",
+                fontFamily = T.Serif,
+                fontWeight = FontWeight.Bold,
+                fontSize = 24.sp,
+                color = T.Ink
+            )
+            Text(
+                text = "Recovery",
+                style = T.meta
+            )
         }
     }
 }
 
+// ── Metric row — label + value, no coloured dots ─────────────
 @Composable
-fun StrainGauge(currentStrain: Float) {
+fun InkMetricRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, style = T.meta, modifier = Modifier.width(72.dp))
+        Text(text = value, style = T.bodyValue)
+    }
+}
+
+// ── Ink bar row — label, value, 4px ink progress bar ─────────
+@Composable
+fun InkBarRow(label: String, value: String, fraction: Float) {
     Column {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Day strain", fontSize = 12.sp, color = Color.Gray)
-            Text("$currentStrain / 21", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(text = label, style = T.meta)
+            Text(text = value, style = T.bodyValue)
         }
-        Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().height(12.dp).background(Color(0xFFF0F0F0), CircleShape)) {
-            Box(Modifier.fillMaxWidth(currentStrain / 21f).fillMaxHeight().background(Color(0xFF534AB7), CircleShape))
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("0", "1", "10", "15", "21").forEach { Text(it, fontSize = 9.sp, color = Color.LightGray) }
-        }
-    }
-}
-
-@Composable
-fun MetricRow(label: String, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).background(Color(0xFF639922), CircleShape))
-        Spacer(Modifier.width(8.dp))
-        Text(label, fontSize = 12.sp, color = Color.Gray, modifier = Modifier.width(70.dp))
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-fun PerformanceBar(label: String, pct: Float, color: Color) {
-    Column(Modifier.padding(vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, fontSize = 12.sp, color = Color.Gray)
-            Text("${pct.toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.height(4.dp))
-        Box(Modifier.fillMaxWidth().height(8.dp).background(Color(0xFFF0F0F0), CircleShape)) {
-            Box(Modifier.fillMaxWidth(pct / 100f).fillMaxHeight().background(color, CircleShape))
+        Spacer(modifier = Modifier.height(6.dp))
+        // Track
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .background(T.Rule)
+        ) {
+            // Fill — solid ink
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .background(T.Ink)
+            )
         }
     }
 }
 
+// ── Sleep stat column ─────────────────────────────────────────
 @Composable
-fun SleepChip(value: String, label: String, modifier: Modifier) {
-    Surface(modifier = modifier, color = Color(0xFFF1F3F4), shape = RoundedCornerShape(12.dp)) {
-        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(label, fontSize = 9.sp, color = Color.Gray)
-        }
+fun InkSleepStat(value: String, label: String, modifier: Modifier) {
+    Column(
+        modifier = modifier.padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            fontFamily = T.Serif,
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp,
+            color = T.Ink
+        )
+        Text(text = label, style = T.meta)
     }
 }
 
+// ── Last workout row ──────────────────────────────────────────
 @Composable
-fun WorkoutCard(workoutInfo: String) {
+fun InkWorkoutRow(workoutInfo: String) {
     val dateRegex = Regex("""\((\d{4})-(\d{2})-(\d{2})\)""")
     val match = dateRegex.find(workoutInfo)
-
     val displayDate = if (match != null) {
         val (_, month, day) = match.destructured
-        val monthName = when(month) {
-            "04" -> "Apr"
+        val monthName = when (month) {
+            "01" -> "Jan"; "02" -> "Feb"; "03" -> "Mar"
+            "04" -> "Apr"; "05" -> "May"; "06" -> "Jun"
+            "07" -> "Jul"; "08" -> "Aug"; "09" -> "Sep"
+            "10" -> "Oct"; "11" -> "Nov"; "12" -> "Dec"
             else -> month
         }
         "$day $monthName"
     } else ""
 
-    val sportName = workoutInfo.substringBefore(" (").replaceFirstChar { it.uppercase() }
+    val sportName   = workoutInfo.substringBefore(" (").replaceFirstChar { it.uppercase() }
     val strainValue = workoutInfo.substringAfter("strain ").trim()
 
-    Surface(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        color = Color(0xFFF1F3F4),
-        shape = RoundedCornerShape(16.dp)
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Column {
-                Text("Last workout — $displayDate", fontSize = 10.sp, color = Color.Gray)
-                Text(sportName, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(text = "$strainValue strain", color = Color(0xFFBA7517), fontWeight = FontWeight.Bold)
+        Column {
+            Text(
+                text = if (displayDate.isNotEmpty()) "Last workout — $displayDate" else "Last workout",
+                style = T.meta
+            )
+            Text(text = sportName, style = T.bodyValue)
+        }
+        if (strainValue.isNotEmpty()) {
+            Text(
+                text = "$strainValue strain",
+                fontFamily = FontFamily.Default,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                color = T.Ink
+            )
         }
     }
+    Spacer(modifier = Modifier.height(8.dp))
+    HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }

@@ -1,301 +1,361 @@
 package com.vitanest.app
 
+// © 2026 Sumeet Garg — VitaNest
+// HomeScreen — e-ink monochrome · Kindle editorial · locked 2026-04-06 ☘️
+
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.staggeredgrid.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.vitanest.app.data.remote.*
 import com.vitanest.app.data.repository.VitaClawRepository
-import kotlinx.coroutines.launch
+import com.vitanest.app.ui.theme.VitaNestTheme as T
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class,
-    androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     navController: NavController,
     repository: VitaClawRepository
 ) {
     val scope = rememberCoroutineScope()
-    var briefData by remember { mutableStateOf<BriefResponse?>(null) }
+    var briefData     by remember { mutableStateOf<BriefResponse?>(null) }
     var portfolioData by remember { mutableStateOf<PortfolioResponse?>(null) }
-    var agenticScore by remember { mutableIntStateOf(0) }
-    var isOnline by remember { mutableStateOf(false) }
-
-    // Pulse State for Health Tile
-    var pulseMetrics by remember { mutableStateOf(PulseMetrics()) }
+    var agenticScore  by remember { mutableIntStateOf(0) }
+    var isOnline      by remember { mutableStateOf(false) }
+    var pulseMetrics  by remember { mutableStateOf(PulseMetrics()) }
 
     LaunchedEffect(Unit) {
-        // 1. Fetch health status and agentic score
         repository.getHealth().let { result ->
-            isOnline = result.isSuccess
+            isOnline     = result.isSuccess
             agenticScore = result.getOrNull()?.agenticScore ?: 0
-            if (result.isFailure) {
-                android.util.Log.e("VitaNetDebug", "Health Fetch Failed: ${result.exceptionOrNull()?.message}")
-            }
         }
-
-        // 2. Fetch Morning Brief
         repository.getBrief().let { result ->
             if (result.isSuccess) briefData = result.getOrNull()
         }
-
-        // 3. Fetch Portfolio snapshot
         repository.getPortfolio().let { result ->
             if (result.isSuccess) portfolioData = result.getOrNull()
         }
-
-        // 4. FIX: Use 'askQuestion' and handle the AskResponse object
-        repository.askQuestion("strain today").let { result -> // Changed from askAgent
+        repository.askQuestion("strain today").let { result ->
             if (result.isSuccess) {
-                val rawResponse = result.getOrNull()?.answer ?: "" // Extract .answer
-                android.util.Log.d("PulseRawData", "RAW TEXT: $rawResponse") // ADD THIS
-                pulseMetrics = parsePulseResponse(rawResponse)
+                val raw = result.getOrNull()?.answer ?: ""
+                pulseMetrics = parsePulseResponse(raw)
             }
         }
     }
 
-    // Professional background gradient
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Brush.verticalGradient(
-                colors = listOf(Color(0xFFFBFBFE), Color(0xFFF3F4F9))
-            )
-        )
+    // ── Root — paper cream background ────────────────────────
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(T.Paper)
     ) {
-        Scaffold(
-            containerColor = Color.Transparent,
-            topBar = {
-                CenterAlignedTopAppBar(
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                    title = { Text("VitaNest", fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp) },
-                    actions = { ConnectivityPulse(isOnline, agenticScore) }
-                )
-            }
-        ) { padding ->
-            LazyVerticalStaggeredGrid(
-                columns = StaggeredGridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp),
-                verticalItemSpacing = 20.dp,
-                horizontalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    MorningBriefHero(briefData)
-                }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = T.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
 
-                // 1. Council Tile
-                item {
-                    FeatureTile("Council", "Ask 5 minds", Icons.Default.Groups) {
-                        navController.navigate("council")
-                    }
-                }
-
-                // 2. Pulse Tile (Health)
-                item {
-                    PulseHomeTile(metrics = pulseMetrics) {
-                        navController.navigate("sicksense")
-                    }
-                }
-
-// 3. FINANCE TILE
-                item {
-                    val total = portfolioData?.totalValueGbp?.let { "£%,.0f".format(it) } ?: "£0"
-                    val pnlGbp = portfolioData?.dailyPnLGbp ?: 0.0
-                    val pnlText = " (£${String.format("%.2f", pnlGbp)})"
-
-                    FeatureTile(
-                        title = "Finance",
-                        subtitle = total,
-                        secondarySubtitle = pnlText,
-                        subtitleColor = Color.Black,
-                        icon = Icons.Default.AccountBalanceWallet,
-                        onClick = {
-                            android.util.Log.d("VITA_DEBUG", "Finance tile clicked! Navigating to portfolio_detail")
-                            navController.navigate("portfolio_detail")
-                        }
+            // ── Top bar ──────────────────────────────────────
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 52.dp, bottom = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "VitaNest",
+                        fontFamily = T.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp,
+                        color = T.Ink
                     )
+                    // Inverted stamp — score
+                    InkStamp(label = "SCORE $agenticScore", isOnline = isOnline)
                 }
-
-                // 4. DIVIDENDS TILE (New)
-                item {
-                    // This will eventually pull from repository.askQuestion("monthly income")
-                    FeatureTile(
-                        title = "Dividends",
-                        subtitle = "£14.17 Apr", // Dynamic placeholder
-                        secondarySubtitle = "£61 to target", // Based on £75 target
-                        subtitleColor = Color(0xFFBA7517), // Gold/Orange for income
-                        icon = Icons.Default.TrendingUp
-                    ) {
-                        navController.navigate("income_detail")
-                    }
-                }
-
-                // 5. Soul & Sky (Keeping the grid balanced)
-                item { FeatureTile("Soul", "Growth", Icons.Default.Favorite) { navController.navigate("soul") } }
-                item { FeatureTile("Sky", "Markets", Icons.Default.WbSunny) { navController.navigate("sky") } }
-
-                // 6. Play & Flow (Optional: remove if grid is full)
-                item { FeatureTile("Play", "Media", Icons.Default.PlayArrow) { navController.navigate("playnest") } }
+                // Heavy rule under header
+                HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
+                Spacer(modifier = Modifier.height(T.sectionGap))
             }
+
+            // ── Morning Brief ─────────────────────────────────
+            item {
+                MorningBriefInk(briefData)
+                Spacer(modifier = Modifier.height(T.sectionGap))
+            }
+
+            // ── BODY section ─────────────────────────────────
+            item {
+                InkSectionHead("BODY")
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                InkModuleRow(
+                    label = "Recovery",
+                    value = "${pulseMetrics.recovery.toInt()}%",
+                    valueColor = T.recoveryColor(pulseMetrics.recovery),
+                    meta = "HRV ${pulseMetrics.hrv}ms · Strain ${pulseMetrics.strain}",
+                    onClick = { navController.navigate("sicksense") }
+                )
+                Spacer(modifier = Modifier.height(T.sectionGap))
+            }
+
+            // ── MONEY section ─────────────────────────────────
+            item {
+                InkSectionHead("MONEY")
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val total  = portfolioData?.totalValueGbp?.let { "£%,.0f".format(it) } ?: "—"
+                val pnl    = portfolioData?.dailyPnLGbp ?: 0.0
+                val pnlStr = "${if (pnl >= 0) "+" else ""}£%.2f".format(pnl)
+
+                // Portfolio value — hero number
+                Text(
+                    text = total,
+                    fontFamily = T.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 40.sp,
+                    color = T.Ink
+                )
+                Text(
+                    text = pnlStr,
+                    style = T.meta,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                InkModuleRow(
+                    label = "Finance",
+                    value = "13 pies →",
+                    meta = "Portfolio detail",
+                    onClick = { navController.navigate("portfolio_detail") }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                InkModuleRow(
+                    label = "Dividends",
+                    value = "£14.17 Apr",
+                    meta = "£61 to target",
+                    onClick = { navController.navigate("income_detail") }
+                )
+                Spacer(modifier = Modifier.height(T.sectionGap))
+            }
+
+            // ── MODULES section ───────────────────────────────
+            item {
+                InkSectionHead("MODULES")
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                InkModuleRow(
+                    label = "Council",
+                    value = "5 minds →",
+                    onClick = { navController.navigate("council") }
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                InkModuleRow(
+                    label = "Soul",
+                    value = "Growth →",
+                    onClick = { navController.navigate("soul") }
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                InkModuleRow(
+                    label = "Sky",
+                    value = "Markets →",
+                    onClick = { navController.navigate("sky") }
+                )
+                Spacer(modifier = Modifier.height(T.sectionGap))
+            }
+
+            // Bottom breathing room
+            item { Spacer(modifier = Modifier.height(80.dp)) }
         }
+
+        // ── Bottom nav ────────────────────────────────────────
+        InkBottomNav(
+            current = "brief",
+            navController = navController,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 
+// ── Inverted stamp ────────────────────────────────────────────
 @Composable
-fun MorningBriefHero(brief: BriefResponse?) {
+fun InkStamp(label: String, isOnline: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .background(T.Ink, RoundedCornerShape(2.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(text = label, style = T.stampLabel)
+        }
+        // Connectivity — subtle ink dot, no animation
+        Spacer(modifier = Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .background(
+                    color = if (isOnline) T.Ink else T.Rule,
+                    shape = androidx.compose.foundation.shape.CircleShape
+                )
+        )
+    }
+}
+
+// ── Section heading ───────────────────────────────────────────
+@Composable
+fun InkSectionHead(text: String) {
+    Text(
+        text = text,
+        style = T.sectionHead,
+        modifier = Modifier.padding(bottom = 6.dp)
+    )
+}
+
+// ── Module row — label left, value right, tap to navigate ─────
+@Composable
+fun InkModuleRow(
+    label: String,
+    value: String,
+    meta: String? = null,
+    valueColor: Color = T.Ink,
+    onClick: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(text = label, style = T.bodyValue)
+            if (meta != null) {
+                Text(text = meta, style = T.meta)
+            }
+        }
+        Text(
+            text = value,
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+            color = valueColor
+        )
+    }
+    HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+}
+
+// ── Morning Brief — ink editorial style ──────────────────────
+@Composable
+fun MorningBriefInk(brief: BriefResponse?) {
     var isExpanded by remember { mutableStateOf(false) }
 
-    Surface(
-        onClick = { isExpanded = !isExpanded },
-        modifier = Modifier.fillMaxWidth().animateContentSize(),
-        shape = RoundedCornerShape(32.dp),
-        color = Color(0xFFEBEBFF), // Lavender per brief
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.6f))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { isExpanded = !isExpanded }
+            .animateContentSize()
     ) {
-        Column(modifier = Modifier.padding(24.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "MORNING BRIEF",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
-                        color = Color(0xFF5C59BB)
-                    )
-                )
-                Spacer(Modifier.weight(1f))
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    tint = Color(0xFF5C59BB)
-                )
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
-                text = brief?.summary ?: "Synthesizing your daily insights...",
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    lineHeight = 24.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF2D2B55)
-                ),
-                maxLines = if (isExpanded) Int.MAX_VALUE else 2,
-                overflow = TextOverflow.Ellipsis
+                text = "MORNING BRIEF",
+                style = T.sectionHead
+            )
+            Text(
+                text = if (isExpanded) "▲" else "▼",
+                style = T.meta
             )
         }
+        Spacer(modifier = Modifier.height(6.dp))
+        HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = brief?.summary ?: "Synthesising your daily insights…",
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.Normal,
+            fontSize = 14.sp,
+            lineHeight = 22.sp,
+            color = T.Ink,
+            maxLines = if (isExpanded) Int.MAX_VALUE else 3,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
     }
 }
 
+// ── Bottom navigation bar ─────────────────────────────────────
 @Composable
-fun PortfolioCard(portfolio: PortfolioResponse?) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().height(120.dp),
-        shape = RoundedCornerShape(32.dp),
-        color = Color(0xFF1A1A1E), // Obsidian
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-    ) {
-        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
-            Text("NET WORTH", style = MaterialTheme.typography.labelSmall, color = Color.Gray, letterSpacing = 1.sp)
-            val totalText = portfolio?.totalValueGbp?.let { "£%,.2f".format(it) } ?: "£0.00"
-            Text(
-                text = totalText,
-                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
-                color = Color.White
-            )
-            portfolio?.dailyPnLGbp?.let { pnl ->
-                Text(
-                    text = "${if (pnl >= 0.0) "+" else ""}£%.2f".format(pnl),
-                    color = if (pnl >= 0.0) Color(0xFF4CAF50) else Color(0xFFF44336),
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun PulseHomeTile(metrics: PulseMetrics, onClick: () -> Unit) {
-    val recoveryColor = when {
-        metrics.recovery >= 67f -> Color(0xFF639922) // Green
-        metrics.recovery >= 34f -> Color(0xFFEF9F27) // Amber
-        else -> Color(0xFFE24B4A) // Red alert
-    }
-
-    FeatureTile(
-        title = "Pulse",
-        subtitle = "Recovery ${metrics.recovery.toInt()}%",
-        subtitleColor = recoveryColor,
-        secondarySubtitle = "Strain ${metrics.strain} • Sleep ${metrics.sleepPerformance.toInt()}%",
-        icon = Icons.Default.MedicalServices,
-        onClick = onClick
-    )
-}
-
-@Composable
-fun FeatureTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    subtitleColor: Color = Color.Gray,
-    secondarySubtitle: String? = null,
-    onClick: () -> Unit
+fun InkBottomNav(
+    current: String,
+    navController: NavController,
+    modifier: Modifier = Modifier
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(160.dp),
-        shape = RoundedCornerShape(32.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, Color(0xFFE0E0E0))
-    ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Box(
-                modifier = Modifier.size(48.dp).background(Color(0xFFF5F5F9), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = Color(0xFF5C59BB), modifier = Modifier.size(24.dp))
-            }
-            Column {
-                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(text = subtitle, style = MaterialTheme.typography.labelSmall, color = subtitleColor)
-                if (secondarySubtitle != null) {
-                    Text(text = secondarySubtitle, style = MaterialTheme.typography.labelSmall, color = Color(0xFF888780))
+    val items = listOf(
+        "brief"   to "Brief",
+        "finance" to "Finance",
+        "pulse"   to "Pulse",
+        "more"    to "More"
+    )
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(T.Paper)
+                .padding(horizontal = T.screenPadding, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
+            items.forEach { (route, label) ->
+                val isActive = current == route
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clickable {
+                        when (route) {
+                            "finance" -> navController.navigate("portfolio_detail")
+                            "pulse"   -> navController.navigate("sicksense")
+                            else      -> { /* coming soon */ }
+                        }
+                    }
+                ) {
+                    Text(
+                        text = label,
+                        fontFamily = FontFamily.Default,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 12.sp,
+                        color = if (isActive) T.Ink else T.Muted
+                    )
+                    if (isActive) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(20.dp)
+                                .height(2.dp)
+                                .background(T.Ink)
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-fun ConnectivityPulse(isOnline: Boolean, score: Int) {
-    val alpha by rememberInfiniteTransition().animateFloat(
-        initialValue = 0.4f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse)
-    )
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 16.dp)) {
-        Column(horizontalAlignment = Alignment.End) {
-            Text("AGENT SCORE", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-            Text(score.toString(), fontWeight = FontWeight.Black, fontSize = 16.sp)
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Box(modifier = Modifier.size(12.dp).background(
-            color = (if (isOnline) Color(0xFF00C853) else Color.Red).copy(alpha = if (isOnline) alpha else 1f),
-            shape = CircleShape
-        ))
     }
 }
