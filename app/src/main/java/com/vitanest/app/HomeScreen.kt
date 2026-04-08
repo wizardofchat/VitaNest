@@ -1,7 +1,8 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// HomeScreen — e-ink monochrome · Kindle editorial · locked 2026-04-06 ☘️
+// HomeScreen — e-ink monochrome · Kindle editorial · locked 2026-04-08 ☘️
+// Changed: parallel coroutines — fixes socket cascade on sequential calls
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -9,8 +10,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,39 +23,39 @@ import androidx.navigation.NavController
 import com.vitanest.app.data.remote.*
 import com.vitanest.app.data.repository.VitaClawRepository
 import com.vitanest.app.ui.theme.VitaNestTheme as T
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 @Composable
 fun HomeScreen(
     navController: NavController,
     repository: VitaClawRepository
 ) {
-    val scope = rememberCoroutineScope()
     var briefData     by remember { mutableStateOf<BriefResponse?>(null) }
     var portfolioData by remember { mutableStateOf<PortfolioResponse?>(null) }
     var agenticScore  by remember { mutableIntStateOf(0) }
     var isOnline      by remember { mutableStateOf(false) }
-    var pulseMetrics  by remember { mutableStateOf(PulseMetrics()) }
 
+    // ── Parallel calls — each gets its own connection, no cascade ──
     LaunchedEffect(Unit) {
-        repository.getHealth().let { result ->
-            isOnline     = result.isSuccess
-            agenticScore = result.getOrNull()?.agenticScore ?: 0
-        }
-        repository.getBrief().let { result ->
-            if (result.isSuccess) briefData = result.getOrNull()
-        }
-        repository.getPortfolio().let { result ->
-            if (result.isSuccess) portfolioData = result.getOrNull()
-        }
-        repository.askQuestion("strain today").let { result ->
-            if (result.isSuccess) {
-                val raw = result.getOrNull()?.answer ?: ""
-                pulseMetrics = parsePulseResponse(raw)
+        coroutineScope {
+            val healthDeferred    = async { repository.getHealth() }
+            val briefDeferred     = async { repository.getBrief() }
+            val portfolioDeferred = async { repository.getPortfolio() }
+
+            healthDeferred.await().let { result ->
+                isOnline     = result.isSuccess
+                agenticScore = result.getOrNull()?.agenticScore ?: 0
+            }
+            briefDeferred.await().let { result ->
+                if (result.isSuccess) briefData = result.getOrNull()
+            }
+            portfolioDeferred.await().let { result ->
+                if (result.isSuccess) portfolioData = result.getOrNull()
             }
         }
     }
 
-    // ── Root — paper cream background ────────────────────────
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -69,7 +68,6 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
 
-            // ── Top bar ──────────────────────────────────────
             item {
                 Row(
                     modifier = Modifier
@@ -85,37 +83,30 @@ fun HomeScreen(
                         fontSize = 22.sp,
                         color = T.Ink
                     )
-                    // Inverted stamp — score
                     InkStamp(label = "SCORE $agenticScore", isOnline = isOnline)
                 }
-                // Heavy rule under header
                 HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
-            // ── Morning Brief ─────────────────────────────────
             item {
                 MorningBriefInk(briefData)
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
-            // ── BODY section ─────────────────────────────────
             item {
                 InkSectionHead("BODY")
                 HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
                 Spacer(modifier = Modifier.height(12.dp))
-
                 InkModuleRow(
                     label = "Recovery",
-                    value = "${pulseMetrics.recovery.toInt()}%",
-                    valueColor = T.recoveryColor(pulseMetrics.recovery),
-                    meta = "HRV ${pulseMetrics.hrv}ms · Strain ${pulseMetrics.strain}",
+                    value = "Pulse →",
+                    meta = "Tap to view today's metrics",
                     onClick = { navController.navigate("sicksense") }
                 )
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
-            // ── MONEY section ─────────────────────────────────
             item {
                 InkSectionHead("MONEY")
                 HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
@@ -125,7 +116,6 @@ fun HomeScreen(
                 val pnl    = portfolioData?.dailyPnLGbp ?: 0.0
                 val pnlStr = "${if (pnl >= 0) "+" else ""}£%.2f".format(pnl)
 
-                // Portfolio value — hero number
                 Text(
                     text = total,
                     fontFamily = T.Serif,
@@ -138,7 +128,6 @@ fun HomeScreen(
                     style = T.meta,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
-
                 InkModuleRow(
                     label = "Finance",
                     value = "13 pies →",
@@ -155,12 +144,10 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
-            // ── MODULES section ───────────────────────────────
             item {
                 InkSectionHead("MODULES")
                 HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
                 Spacer(modifier = Modifier.height(12.dp))
-
                 InkModuleRow(
                     label = "Council",
                     value = "5 minds →",
@@ -181,11 +168,9 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
-            // Bottom breathing room
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
 
-        // ── Bottom nav ────────────────────────────────────────
         InkBottomNav(
             current = "brief",
             navController = navController,
@@ -194,7 +179,6 @@ fun HomeScreen(
     }
 }
 
-// ── Inverted stamp ────────────────────────────────────────────
 @Composable
 fun InkStamp(label: String, isOnline: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -205,7 +189,6 @@ fun InkStamp(label: String, isOnline: Boolean) {
         ) {
             Text(text = label, style = T.stampLabel)
         }
-        // Connectivity — subtle ink dot, no animation
         Spacer(modifier = Modifier.width(8.dp))
         Box(
             modifier = Modifier
@@ -218,7 +201,6 @@ fun InkStamp(label: String, isOnline: Boolean) {
     }
 }
 
-// ── Section heading ───────────────────────────────────────────
 @Composable
 fun InkSectionHead(text: String) {
     Text(
@@ -228,7 +210,6 @@ fun InkSectionHead(text: String) {
     )
 }
 
-// ── Module row — label left, value right, tap to navigate ─────
 @Composable
 fun InkModuleRow(
     label: String,
@@ -262,7 +243,6 @@ fun InkModuleRow(
     HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }
 
-// ── Morning Brief — ink editorial style ──────────────────────
 @Composable
 fun MorningBriefInk(brief: BriefResponse?) {
     var isExpanded by remember { mutableStateOf(false) }
@@ -278,14 +258,8 @@ fun MorningBriefInk(brief: BriefResponse?) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "MORNING BRIEF",
-                style = T.sectionHead
-            )
-            Text(
-                text = if (isExpanded) "▲" else "▼",
-                style = T.meta
-            )
+            Text(text = "MORNING BRIEF", style = T.sectionHead)
+            Text(text = if (isExpanded) "▲" else "▼", style = T.meta)
         }
         Spacer(modifier = Modifier.height(6.dp))
         HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
@@ -303,7 +277,6 @@ fun MorningBriefInk(brief: BriefResponse?) {
     }
 }
 
-// ── Bottom navigation bar ─────────────────────────────────────
 @Composable
 fun InkBottomNav(
     current: String,

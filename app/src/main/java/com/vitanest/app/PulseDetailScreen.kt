@@ -29,15 +29,6 @@ fun PulseDetailScreen(
 ) {
     var metrics by remember { mutableStateOf(PulseMetrics()) }
 
-    LaunchedEffect(Unit) {
-        repository.askQuestion("strain today").let { result ->
-            if (result.isSuccess) {
-                val rawText = result.getOrNull()?.answer ?: ""
-                metrics = parsePulseResponse(rawText)
-            }
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()

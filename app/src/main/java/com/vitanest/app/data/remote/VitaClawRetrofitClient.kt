@@ -9,7 +9,7 @@ import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
-    private const val BASE_URL = "http://192.168.7.226:8000/"
+    private const val BASE_URL = "http://100.69.38.81:8000/"
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -23,6 +23,10 @@ object RetrofitClient {
         })
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .connectionPool(
+            okhttp3.ConnectionPool(0, 1, TimeUnit.NANOSECONDS)
+        )
         .build()
 
     val apiService: VitaClawApiService by lazy {
