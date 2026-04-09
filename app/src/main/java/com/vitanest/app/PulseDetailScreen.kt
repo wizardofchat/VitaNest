@@ -1,7 +1,9 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// PulseDetailScreen — e-ink monochrome · Kindle editorial · locked 2026-04-06 ☘️
+// PulseDetailScreen — e-ink monochrome · Kindle editorial · locked 2026-04-09 ☘️
+// Changed: wired to GET /whoop — live recovery, HRV, RHR, SpO2, skin temp
+//          strain/sleep/workout show — pending VitaClaw /whoop extension
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -28,6 +30,26 @@ fun PulseDetailScreen(
     onBack: () -> Unit
 ) {
     var metrics by remember { mutableStateOf(PulseMetrics()) }
+    var lastUpdated by remember { mutableStateOf("") }
+
+    // ── GET /whoop — live data, no /ask, no quota drain ──────
+    LaunchedEffect(Unit) {
+        repository.getWhoop().let { result ->
+            if (result.isSuccess) {
+                val w = result.getOrNull()!!
+                metrics = metrics.copy(
+                    recovery  = w.recoveryScore,
+                    hrv       = w.hrvRmssdMilli,
+                    rhr       = w.restingHeartRate,
+                    spo2      = w.spo2Percentage,
+                    skinTemp  = w.skinTempCelsius
+                )
+                lastUpdated = w.lastUpdated
+                    .take(16)
+                    .replace("T", " ")
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -58,13 +80,18 @@ fun PulseDetailScreen(
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Pulse · Today",
-                    fontFamily = T.Serif,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = T.Ink
-                )
+                Column {
+                    Text(
+                        text = "Pulse · Today",
+                        fontFamily = T.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = T.Ink
+                    )
+                    if (lastUpdated.isNotEmpty()) {
+                        Text(text = lastUpdated, style = T.meta)
+                    }
+                }
             }
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
@@ -75,16 +102,13 @@ fun PulseDetailScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Recovery ring — ONE colour exception
                 InkRecoveryRing(percentage = metrics.recovery)
-
                 Spacer(modifier = Modifier.width(32.dp))
-
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    InkMetricRow("HRV",       "${metrics.hrv} ms")
-                    InkMetricRow("RHR",       "${metrics.rhr.toInt()} bpm")
-                    InkMetricRow("SpO2",      "${"%.1f".format(metrics.spo2)}%")
-                    InkMetricRow("Skin temp", "${metrics.skinTemp}°C")
+                    InkMetricRow("HRV",       if (metrics.hrv > 0f) "${"%.1f".format(metrics.hrv)} ms" else "—")
+                    InkMetricRow("RHR",       if (metrics.rhr > 0f) "${metrics.rhr.toInt()} bpm" else "—")
+                    InkMetricRow("SpO2",      if (metrics.spo2 > 0f) "${"%.1f".format(metrics.spo2)}%" else "—")
+                    InkMetricRow("Skin temp", if (metrics.skinTemp > 0f) "${"%.1f".format(metrics.skinTemp)}°C" else "—")
                 }
             }
 
@@ -92,30 +116,25 @@ fun PulseDetailScreen(
             HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
             Spacer(modifier = Modifier.height(T.sectionGap))
 
-            // ── Activity & Sleep ──────────────────────────────
+            // ── Activity & Sleep — pending VitaClaw extension ─
             Text(text = "ACTIVITY & SLEEP", style = T.sectionHead)
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Strain gauge — ink bar
             InkBarRow(
                 label = "Day strain",
-                value = "${metrics.strain} / 21",
+                value = if (metrics.strain > 0f) "${metrics.strain} / 21" else "—",
                 fraction = (metrics.strain / 21f).coerceIn(0f, 1f)
             )
-
             Spacer(modifier = Modifier.height(16.dp))
-
             InkBarRow(
                 label = "Sleep performance",
-                value = "${metrics.sleepPerformance.toInt()}%",
+                value = if (metrics.sleepPerformance > 0f) "${metrics.sleepPerformance.toInt()}%" else "—",
                 fraction = (metrics.sleepPerformance / 100f).coerceIn(0f, 1f)
             )
-
             Spacer(modifier = Modifier.height(8.dp))
-
             InkBarRow(
                 label = "Sleep efficiency",
-                value = "${metrics.sleepEfficiency.toInt()}%",
+                value = if (metrics.sleepEfficiency > 0f) "${metrics.sleepEfficiency.toInt()}%" else "—",
                 fraction = (metrics.sleepEfficiency / 100f).coerceIn(0f, 1f)
             )
 
@@ -123,17 +142,16 @@ fun PulseDetailScreen(
             HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
             Spacer(modifier = Modifier.height(T.sectionGap))
 
-            // ── Sleep detail — three ink columns ─────────────
+            // ── Sleep detail ──────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 InkSleepStat(
-                    value = "${metrics.remMin.toInt()}",
+                    value = if (metrics.remMin > 0f) "${metrics.remMin.toInt()}" else "—",
                     label = "REM min",
                     modifier = Modifier.weight(1f)
                 )
-                // Vertical rule
                 Box(
                     modifier = Modifier
                         .width(T.ruleThickness)
@@ -142,7 +160,7 @@ fun PulseDetailScreen(
                         .align(Alignment.CenterVertically)
                 )
                 InkSleepStat(
-                    value = "${metrics.deepMin.toInt()}",
+                    value = if (metrics.deepMin > 0f) "${metrics.deepMin.toInt()}" else "—",
                     label = "Deep min",
                     modifier = Modifier.weight(1f)
                 )
@@ -154,7 +172,7 @@ fun PulseDetailScreen(
                         .align(Alignment.CenterVertically)
                 )
                 InkSleepStat(
-                    value = "${metrics.disturbances}",
+                    value = if (metrics.disturbances > 0) "${metrics.disturbances}" else "—",
                     label = "Disturbances",
                     modifier = Modifier.weight(1f)
                 )
@@ -183,12 +201,10 @@ fun InkRecoveryRing(percentage: Float) {
         modifier = Modifier.size(110.dp)
     ) {
         Canvas(modifier = Modifier.size(100.dp)) {
-            // Track — light rule
             drawCircle(
                 color = Color(0xFFC8C4BB),
                 style = Stroke(width = 8.dp.toPx())
             )
-            // Arc — recovery colour
             drawArc(
                 color = ringColor,
                 startAngle = -90f,
@@ -199,21 +215,18 @@ fun InkRecoveryRing(percentage: Float) {
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "${percentage.toInt()}%",
+                text = if (percentage > 0f) "${percentage.toInt()}%" else "—",
                 fontFamily = T.Serif,
                 fontWeight = FontWeight.Bold,
                 fontSize = 24.sp,
                 color = T.Ink
             )
-            Text(
-                text = "Recovery",
-                style = T.meta
-            )
+            Text(text = "Recovery", style = T.meta)
         }
     }
 }
 
-// ── Metric row — label + value, no coloured dots ─────────────
+// ── Metric row ────────────────────────────────────────────────
 @Composable
 fun InkMetricRow(label: String, value: String) {
     Row(
@@ -225,7 +238,7 @@ fun InkMetricRow(label: String, value: String) {
     }
 }
 
-// ── Ink bar row — label, value, 4px ink progress bar ─────────
+// ── Ink bar row ───────────────────────────────────────────────
 @Composable
 fun InkBarRow(label: String, value: String, fraction: Float) {
     Column {
@@ -237,14 +250,12 @@ fun InkBarRow(label: String, value: String, fraction: Float) {
             Text(text = value, style = T.bodyValue)
         }
         Spacer(modifier = Modifier.height(6.dp))
-        // Track
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(4.dp)
                 .background(T.Rule)
         ) {
-            // Fill — solid ink
             Box(
                 modifier = Modifier
                     .fillMaxWidth(fraction)
@@ -303,9 +314,12 @@ fun InkWorkoutRow(workoutInfo: String) {
                 text = if (displayDate.isNotEmpty()) "Last workout — $displayDate" else "Last workout",
                 style = T.meta
             )
-            Text(text = sportName, style = T.bodyValue)
+            Text(
+                text = if (sportName.isNotEmpty() && sportName != "No recent workout") sportName else "—",
+                style = T.bodyValue
+            )
         }
-        if (strainValue.isNotEmpty()) {
+        if (strainValue.isNotEmpty() && strainValue != "No recent workout") {
             Text(
                 text = "$strainValue strain",
                 fontFamily = FontFamily.Default,

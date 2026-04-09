@@ -6,6 +6,7 @@ import com.vitanest.app.data.remote.BriefResponse
 import com.vitanest.app.data.remote.HealthResponse
 import com.vitanest.app.data.remote.PiesResponse
 import com.vitanest.app.data.remote.PortfolioResponse
+import com.vitanest.app.data.remote.WhoopResponse
 import com.vitanest.app.data.remote.RetrofitClient
 
 open class VitaClawRepository {
@@ -80,6 +81,21 @@ open class VitaClawRepository {
                 val body = response.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response body from /brief"))
+            } else {
+                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun getWhoop(): Result<WhoopResponse> {
+        return try {
+            val response = apiService.getWhoop()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response body from /whoop"))
             } else {
                 Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
             }

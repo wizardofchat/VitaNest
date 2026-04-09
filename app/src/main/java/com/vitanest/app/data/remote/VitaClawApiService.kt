@@ -73,6 +73,16 @@ data class BriefResponse(
     @SerialName("last_updated") val lastUpdated: String
 )
 
+@Serializable
+data class WhoopResponse(
+    @SerialName("recovery_score") val recoveryScore: Float = 0f,
+    @SerialName("resting_heart_rate") val restingHeartRate: Float = 0f,
+    @SerialName("hrv_rmssd_milli") val hrvRmssdMilli: Float = 0f,
+    @SerialName("spo2_percentage") val spo2Percentage: Float = 0f,
+    @SerialName("skin_temp_celsius") val skinTempCelsius: Float = 0f,
+    @SerialName("last_updated") val lastUpdated: String = ""
+)
+
 interface VitaClawApiService {
     @GET("health")
     suspend fun getHealth(): Response<HealthResponse>
@@ -88,4 +98,7 @@ interface VitaClawApiService {
 
     @GET("brief")
     suspend fun getBrief(): Response<BriefResponse>
+
+    @GET("whoop")
+    suspend fun getWhoop(): Response<WhoopResponse>
 }
