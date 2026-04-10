@@ -245,7 +245,7 @@ fun InkModuleRow(
 
 @Composable
 fun MorningBriefInk(brief: BriefResponse?) {
-    var isExpanded by remember { mutableStateOf(false) }
+    var isExpanded by remember { mutableStateOf(true) }
 
     Column(
         modifier = Modifier

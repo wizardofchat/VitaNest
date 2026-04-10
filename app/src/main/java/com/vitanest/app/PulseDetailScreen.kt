@@ -38,11 +38,18 @@ fun PulseDetailScreen(
             if (result.isSuccess) {
                 val w = result.getOrNull()!!
                 metrics = metrics.copy(
-                    recovery  = w.recoveryScore,
-                    hrv       = w.hrvRmssdMilli,
-                    rhr       = w.restingHeartRate,
-                    spo2      = w.spo2Percentage,
-                    skinTemp  = w.skinTempCelsius
+                    recovery         = w.recoveryScore,
+                    hrv              = w.hrvRmssdMilli,
+                    rhr              = w.restingHeartRate,
+                    spo2             = w.spo2Percentage,
+                    skinTemp         = w.skinTempCelsius,
+                    strain           = w.strain,
+                    sleepPerformance = w.sleepPerformance,
+                    sleepEfficiency  = w.sleepEfficiency,
+                    remMin           = w.remMin,
+                    deepMin          = w.deepMin,
+                    disturbances     = w.disturbances,
+                    lastWorkout      = w.lastWorkout
                 )
                 lastUpdated = w.lastUpdated
                     .take(16)
@@ -302,7 +309,9 @@ fun InkWorkoutRow(workoutInfo: String) {
     } else ""
 
     val sportName   = workoutInfo.substringBefore(" (").replaceFirstChar { it.uppercase() }
-    val strainValue = workoutInfo.substringAfter("strain ").trim()
+    val strainValue = if (workoutInfo.contains("strain "))
+        workoutInfo.substringAfter("strain ").trim()
+    else ""
 
     Row(
         modifier = Modifier.fillMaxWidth(),

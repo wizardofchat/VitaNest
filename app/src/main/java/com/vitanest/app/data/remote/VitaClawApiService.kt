@@ -75,12 +75,19 @@ data class BriefResponse(
 
 @Serializable
 data class WhoopResponse(
-    @SerialName("recovery_score") val recoveryScore: Float = 0f,
+    @SerialName("recovery_score")     val recoveryScore: Float = 0f,
     @SerialName("resting_heart_rate") val restingHeartRate: Float = 0f,
-    @SerialName("hrv_rmssd_milli") val hrvRmssdMilli: Float = 0f,
-    @SerialName("spo2_percentage") val spo2Percentage: Float = 0f,
-    @SerialName("skin_temp_celsius") val skinTempCelsius: Float = 0f,
-    @SerialName("last_updated") val lastUpdated: String = ""
+    @SerialName("hrv_rmssd_milli")    val hrvRmssdMilli: Float = 0f,
+    @SerialName("spo2_percentage")    val spo2Percentage: Float = 0f,
+    @SerialName("skin_temp_celsius")  val skinTempCelsius: Float = 0f,
+    @SerialName("last_updated")       val lastUpdated: String = "",
+    @SerialName("strain")             val strain: Float = 0f,
+    @SerialName("sleep_performance")  val sleepPerformance: Float = 0f,
+    @SerialName("sleep_efficiency")   val sleepEfficiency: Float = 0f,
+    @SerialName("rem_min")            val remMin: Float = 0f,
+    @SerialName("deep_min")           val deepMin: Float = 0f,
+    @SerialName("disturbances")       val disturbances: Int = 0,
+    @SerialName("last_workout")       val lastWorkout: String = ""
 )
 
 interface VitaClawApiService {
