@@ -44,8 +44,6 @@ import com.vitanest.app.ui.theme.VitaNestTheme as T
 import androidx.compose.ui.text.font.FontFamily
 
 // ── Phase 1 constants — replace in Phase 2 ──────────────────────────
-private const val JEPQ_PRICE_USD = 54.20f   // TODO Phase 2: yfinance live price
-private const val FX_RATE_USD_GBP = 0.79f   // TODO Phase 2: live FX rate
 private const val INCOME_GOAL_GBP = 150f    // from goals.yaml
 private const val JEPQ_TICKER = "JEPQ"
 
@@ -57,9 +55,9 @@ fun DividendSimulatorScreen(
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
-    // ── State ────────────────────────────────────────────────────────
     var currentShares    by remember { mutableStateOf<Double?>(null) }
     var avgPerShare      by remember { mutableStateOf<Double?>(null) }
+    var priceGbp by remember { mutableStateOf<Double?>(null) }
     var dataQuality      by remember { mutableStateOf<String?>(null) }
     var daysUntilExDiv   by remember { mutableStateOf<Int?>(null) }
     var exDivDate        by remember { mutableStateOf<String?>(null) }
@@ -79,6 +77,7 @@ fun DividendSimulatorScreen(
             val dividendResult = repository.getDividendData()
             dividendResult.onSuccess { dividendData ->
                 val jepq = dividendData.tickers.find { it.ticker == JEPQ_TICKER }
+                priceGbp = jepq?.priceGbp
                 avgPerShare = jepq?.avgPerShare
                 dataQuality = jepq?.dataQuality
                 daysUntilExDiv = jepq?.daysUntilExDiv
@@ -93,13 +92,13 @@ fun DividendSimulatorScreen(
     }
 
     // ── Derived math ─────────────────────────────────────────────────
-    val simGbp     = simInvestmentGbp.toFloatOrNull() ?: 0f
-    val simShares  = if (JEPQ_PRICE_USD > 0)
-        simGbp / (JEPQ_PRICE_USD * FX_RATE_USD_GBP) else 0f
+    val simGbp    = simInvestmentGbp.toFloatOrNull() ?: 0f
+    val price     = priceGbp ?: 0.0
+    val simShares = if (price > 0) simGbp / price else 0.0
     val totalShares = (currentShares ?: 0.0) + simShares
 
-    val monthlyCurrentGbp = (currentShares ?: 0.0) * (avgPerShare ?: 0.0) * FX_RATE_USD_GBP
-    val monthlySimGbp     = totalShares * (avgPerShare ?: 0.0) * FX_RATE_USD_GBP
+    val monthlyCurrentGbp = (currentShares ?: 0.0) * (avgPerShare ?: 0.0) * 0.79
+    val monthlySimGbp     = totalShares * (avgPerShare ?: 0.0) * 0.79
     val annualCurrentGbp  = monthlyCurrentGbp * 12
     val annualSimGbp      = monthlySimGbp * 12
     val gapCurrentGbp     = INCOME_GOAL_GBP - monthlyCurrentGbp.toFloat()
@@ -227,11 +226,11 @@ fun DividendSimulatorScreen(
                         modifier = Modifier.Companion.fillMaxWidth()
                     )
 
-                    if (simGbp > 0f) {
-                        Spacer(Modifier.Companion.height(8.dp))
+                    if (simGbp > 0f && price > 0) {
+                        Spacer(Modifier.height(8.dp))
                         Text(
                             "+ ${"%.4f".format(simShares)} shares" +
-                                    " at £${"%.2f".format(JEPQ_PRICE_USD * FX_RATE_USD_GBP)}/share (est.)",
+                                    " at £${"%.2f".format(price)}/share",
                             fontSize = 11.sp,
                             color = T.Muted,
                             fontFamily = FontFamily.Default
@@ -336,8 +335,7 @@ fun DividendSimulatorScreen(
                         )
                     }
                     InkRow("Frequency", "Monthly")
-                    InkRow("FX rate (est.)", "1 USD = £$FX_RATE_USD_GBP")
-                    InkRow("Price (est.)", "$$JEPQ_PRICE_USD USD")
+                    InkRow("Price (GBP)", if (price > 0) "£${"%.2f".format(price)}" else "—")
                 }
 
                 Spacer(Modifier.Companion.height(20.dp))

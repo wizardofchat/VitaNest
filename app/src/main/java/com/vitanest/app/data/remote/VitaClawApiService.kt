@@ -111,7 +111,10 @@ data class DividendHolding(
     @SerialName("data_quality_notes") val dataQualityNotes: String?,
     @SerialName("days_until_ex_div") val daysUntilExDiv: Int?,
     @SerialName("is_dividend_payer") val isDividendPayer: Boolean,
-    @SerialName("next_upcoming") val nextUpcoming: DividendNextUpcoming?
+    @SerialName("next_upcoming") val nextUpcoming: DividendNextUpcoming?,
+    @SerialName("price_gbp") val priceGbp: Double? = null,
+    @SerialName("quantity") val quantity: Double? = null,
+    @SerialName("value_gbp") val valueGbp: Double? = null
 )
 
 @Serializable
