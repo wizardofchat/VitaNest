@@ -39,6 +39,7 @@ data class PortfolioResponse(
 data class Position(
     val ticker: String,
     val name: String = "",
+    @SerialName("quantity") val quantity: Double = 0.0,
     @SerialName("value_gbp") val marketValue: Double,
     @SerialName("pnl_gbp") val pnlPercent: Double = 0.0
 )
@@ -90,6 +91,35 @@ data class WhoopResponse(
     @SerialName("last_workout")       val lastWorkout: String = ""
 )
 
+@Serializable
+data class DividendNextUpcoming(
+    @SerialName("ex_div_date_earliest") val exDivDateEarliest: String?,
+    @SerialName("ex_div_date_latest") val exDivDateLatest: String?,
+    @SerialName("payment_date_earliest") val paymentDateEarliest: String?,
+    @SerialName("confirmed") val confirmed: Boolean
+)
+
+@Serializable
+data class DividendHolding(
+    @SerialName("ticker") val ticker: String,
+    @SerialName("name") val name: String,
+    @SerialName("currency") val currency: String,
+    @SerialName("frequency") val frequency: String?,
+    @SerialName("avg_per_share") val avgPerShare: Double?,
+    @SerialName("avg_calculated_from") val avgCalculatedFrom: Int,
+    @SerialName("data_quality") val dataQuality: String,
+    @SerialName("data_quality_notes") val dataQualityNotes: String?,
+    @SerialName("days_until_ex_div") val daysUntilExDiv: Int?,
+    @SerialName("is_dividend_payer") val isDividendPayer: Boolean,
+    @SerialName("next_upcoming") val nextUpcoming: DividendNextUpcoming?
+)
+
+@Serializable
+data class DividendDataResponse(
+    @SerialName("fetched_at") val fetchedAt: String,
+    @SerialName("total_tickers_tracked") val totalTickersTracked: Int,
+    @SerialName("tickers") val tickers: List<DividendHolding>
+)
 interface VitaClawApiService {
     @GET("health")
     suspend fun getHealth(): Response<HealthResponse>
@@ -108,4 +138,7 @@ interface VitaClawApiService {
 
     @GET("whoop")
     suspend fun getWhoop(): Response<WhoopResponse>
+
+    @GET("portfolio/dividend-data")
+    suspend fun getDividendData(): Response<DividendDataResponse>
 }

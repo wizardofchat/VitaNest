@@ -139,7 +139,7 @@ fun HomeScreen(
                     label = "Dividends",
                     value = "£14.17 Apr",
                     meta = "£61 to target",
-                    onClick = { navController.navigate("income_detail") }
+                    onClick = { navController.navigate("dividend_simulator") }
                 )
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
@@ -305,9 +305,10 @@ fun InkBottomNav(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.clickable {
                         when (route) {
+                            "brief"   -> navController.navigate("home")
                             "finance" -> navController.navigate("portfolio_detail")
                             "pulse"   -> navController.navigate("sicksense")
-                            else      -> { /* coming soon */ }
+                            "more"    -> navController.navigate("council")
                         }
                     }
                 ) {

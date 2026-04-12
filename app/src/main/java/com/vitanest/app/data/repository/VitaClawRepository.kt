@@ -8,6 +8,7 @@ import com.vitanest.app.data.remote.PiesResponse
 import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.remote.WhoopResponse
 import com.vitanest.app.data.remote.RetrofitClient
+import com.vitanest.app.data.remote.DividendDataResponse
 
 open class VitaClawRepository {
 
@@ -96,6 +97,21 @@ open class VitaClawRepository {
                 val body = response.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response body from /whoop"))
+            } else {
+                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun getDividendData(): Result<DividendDataResponse> {
+        return try {
+            val response = apiService.getDividendData()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response body from /portfolio/dividend-data"))
             } else {
                 Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
             }

@@ -55,6 +55,12 @@ class MainActivity : ComponentActivity() {
                         composable("council") {
                             ComingSoonScreen(onBack = { navController.popBackStack() })
                         }
+                        composable("dividend_simulator") {
+                            DividendSimulatorScreen(
+                                repository = vitaClawRepository,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                     }
                 }
             }
@@ -90,3 +96,4 @@ fun ComingSoonScreen(onBack: () -> Unit) {
         }
     }
 }
+
