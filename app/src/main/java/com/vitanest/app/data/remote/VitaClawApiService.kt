@@ -18,6 +18,7 @@ data class HealthResponse(
 @Serializable
 data class AskRequest(
     val query: String,
+    val source: String = "vitanest",   // mandatory per API contract 2026-04-22
     val context: String? = ""
 )
 
@@ -25,7 +26,8 @@ data class AskRequest(
 data class AskResponse(
     val answer: String,
     val sources: List<String>? = emptyList(),
-    val sentiment: String? = null
+    val sentiment: String? = null,
+    val tier: String? = null           // "polars" | "vitanest_blocked" etc
 )
 
 @Serializable
@@ -123,6 +125,7 @@ data class DividendDataResponse(
     @SerialName("total_tickers_tracked") val totalTickersTracked: Int,
     @SerialName("tickers") val tickers: List<DividendHolding>
 )
+
 interface VitaClawApiService {
     @GET("health")
     suspend fun getHealth(): Response<HealthResponse>

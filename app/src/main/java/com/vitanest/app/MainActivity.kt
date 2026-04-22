@@ -28,28 +28,29 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color    = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
 
                     NavHost(
-                        navController = navController,
+                        navController    = navController,
                         startDestination = "home"
                     ) {
                         composable("home") {
                             HomeScreen(navController, vitaClawRepository)
                         }
-
                         composable("sicksense") {
                             PulseDetailScreen(
                                 repository = vitaClawRepository,
-                                onBack = { navController.popBackStack() }
+                                onBack     = { navController.popBackStack() }
                             )
                         }
+                        // portfolio_detail now routes to FinanceScreen hub
+                        // FinanceScreen owns: Pies surface + Ask surface
                         composable("portfolio_detail") {
-                            PortfolioDetailScreen(
+                            FinanceScreen(
                                 navController = navController,
-                                repository = vitaClawRepository
+                                repository    = vitaClawRepository
                             )
                         }
                         composable("council") {
@@ -58,7 +59,7 @@ class MainActivity : ComponentActivity() {
                         composable("dividend_simulator") {
                             DividendSimulatorScreen(
                                 repository = vitaClawRepository,
-                                onBack = { navController.popBackStack() }
+                                onBack     = { navController.popBackStack() }
                             )
                         }
                     }
@@ -78,16 +79,16 @@ fun ComingSoonScreen(onBack: () -> Unit) {
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector    = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
                 }
             )
         }
-    ) { innerPadding -> // Fixed 'padding' unresolved reference
+    ) { innerPadding ->
         Box(
-            modifier = Modifier
+            modifier         = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
             contentAlignment = Alignment.Center
@@ -96,4 +97,3 @@ fun ComingSoonScreen(onBack: () -> Unit) {
         }
     }
 }
-
