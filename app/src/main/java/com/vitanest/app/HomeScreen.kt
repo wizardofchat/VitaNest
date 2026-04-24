@@ -2,7 +2,7 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // HomeScreen — e-ink monochrome · Kindle editorial · locked 2026-04-08 ☘️
-// Changed: parallel coroutines — fixes socket cascade on sequential calls
+// Changed: ENERGY section added below MONEY · parallel energy fetch
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -33,6 +33,7 @@ fun HomeScreen(
 ) {
     var briefData     by remember { mutableStateOf<BriefResponse?>(null) }
     var portfolioData by remember { mutableStateOf<PortfolioResponse?>(null) }
+    var energyData    by remember { mutableStateOf<EnergyResponse?>(null) }
     var agenticScore  by remember { mutableIntStateOf(0) }
     var isOnline      by remember { mutableStateOf(false) }
 
@@ -42,6 +43,7 @@ fun HomeScreen(
             val healthDeferred    = async { repository.getHealth() }
             val briefDeferred     = async { repository.getBrief() }
             val portfolioDeferred = async { repository.getPortfolio() }
+            val energyDeferred    = async { repository.getEnergy() }
 
             healthDeferred.await().let { result ->
                 isOnline     = result.isSuccess
@@ -52,6 +54,9 @@ fun HomeScreen(
             }
             portfolioDeferred.await().let { result ->
                 if (result.isSuccess) portfolioData = result.getOrNull()
+            }
+            energyDeferred.await().let { result ->
+                if (result.isSuccess) energyData = result.getOrNull()
             }
         }
     }
@@ -68,6 +73,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
 
+            // ── Header ────────────────────────────────────────────
             item {
                 Row(
                     modifier = Modifier
@@ -77,11 +83,11 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "VitaNest",
+                        text       = "VitaNest",
                         fontFamily = T.Serif,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 22.sp,
-                        color = T.Ink
+                        fontSize   = 22.sp,
+                        color      = T.Ink
                     )
                     InkStamp(label = "SCORE $agenticScore", isOnline = isOnline)
                 }
@@ -89,24 +95,27 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
+            // ── Morning Brief ─────────────────────────────────────
             item {
                 MorningBriefInk(briefData)
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
+            // ── BODY ──────────────────────────────────────────────
             item {
                 InkSectionHead("BODY")
                 HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
                 Spacer(modifier = Modifier.height(12.dp))
                 InkModuleRow(
-                    label = "Recovery",
-                    value = "Pulse →",
-                    meta = "Tap to view today's metrics",
+                    label   = "Recovery",
+                    value   = "Pulse →",
+                    meta    = "Tap to view today's metrics",
                     onClick = { navController.navigate("sicksense") }
                 )
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
+            // ── MONEY ─────────────────────────────────────────────
             item {
                 InkSectionHead("MONEY")
                 HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
@@ -117,52 +126,96 @@ fun HomeScreen(
                 val pnlStr = "${if (pnl >= 0) "+" else ""}£%.2f".format(pnl)
 
                 Text(
-                    text = total,
+                    text       = total,
                     fontFamily = T.Serif,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 40.sp,
-                    color = T.Ink
+                    fontSize   = 40.sp,
+                    color      = T.Ink
                 )
                 Text(
-                    text = pnlStr,
-                    style = T.meta,
+                    text     = pnlStr,
+                    style    = T.meta,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
                 InkModuleRow(
-                    label = "Finance",
-                    value = "13 pies →",
-                    meta = "Portfolio detail",
+                    label   = "Finance",
+                    value   = "13 pies →",
+                    meta    = "Portfolio detail",
                     onClick = { navController.navigate("portfolio_detail") }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 InkModuleRow(
-                    label = "Dividends",
-                    value = "£14.17 Apr",
-                    meta = "£61 to target",
+                    label   = "Dividends",
+                    value   = "£14.17 Apr",
+                    meta    = "£61 to target",
                     onClick = { navController.navigate("dividend_simulator") }
                 )
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
+            // ── ENERGY ────────────────────────────────────────────
+            item {
+                InkSectionHead("ENERGY")
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Solar row — headline: kWh generated · meta: £ saved
+                val solarKwh    = energyData?.solarGeneratedKwh
+                    ?.let { "${"%.1f".format(it)} kWh" } ?: "—"
+                val solarSaving = energyData?.solarSavingsGbp
+                    ?.let { "£${"%.2f".format(it)} saved" }
+                    ?: energyData?.exportEarningsGbp
+                        ?.let { "£${"%.2f".format(it)} exported" }
+
+                InkModuleRow(
+                    label   = "Solar",
+                    value   = solarKwh,
+                    meta    = solarSaving,
+                    onClick = { navController.navigate("energy") }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // EV row — headline: charge mode (most actionable) · meta: kWh + cost
+                val chargeModeLabel = energyData?.chargeMode
+                    ?.takeIf { it != "None" && it.isNotBlank() }
+                    ?: "—"
+                val evMeta = buildString {
+                    energyData?.evTotalKwh?.let { append("${"%.1f".format(it)} kWh") }
+                    energyData?.evChargingCostGbp?.let {
+                        if (isNotEmpty()) append(" · ")
+                        append("£${"%.2f".format(it)}")
+                    }
+                }.ifEmpty { null }
+
+                InkModuleRow(
+                    label   = "EV",
+                    value   = chargeModeLabel,
+                    meta    = evMeta,
+                    onClick = { navController.navigate("energy") }
+                )
+                Spacer(modifier = Modifier.height(T.sectionGap))
+            }
+
+            // ── MODULES ───────────────────────────────────────────
             item {
                 InkSectionHead("MODULES")
                 HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
                 Spacer(modifier = Modifier.height(12.dp))
                 InkModuleRow(
-                    label = "Council",
-                    value = "5 minds →",
+                    label   = "Council",
+                    value   = "5 minds →",
                     onClick = { navController.navigate("council") }
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 InkModuleRow(
-                    label = "Soul",
-                    value = "Growth →",
+                    label   = "Soul",
+                    value   = "Growth →",
                     onClick = { navController.navigate("soul") }
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 InkModuleRow(
-                    label = "Sky",
-                    value = "Markets →",
+                    label   = "Sky",
+                    value   = "Markets →",
                     onClick = { navController.navigate("sky") }
                 )
                 Spacer(modifier = Modifier.height(T.sectionGap))
@@ -172,13 +225,14 @@ fun HomeScreen(
         }
 
         InkBottomNav(
-            current = "brief",
+            current       = "brief",
             navController = navController,
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier      = Modifier.align(Alignment.BottomCenter)
         )
     }
 }
 
+// ── Stamp ─────────────────────────────────────────────────────
 @Composable
 fun InkStamp(label: String, isOnline: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -201,15 +255,17 @@ fun InkStamp(label: String, isOnline: Boolean) {
     }
 }
 
+// ── Section head ──────────────────────────────────────────────
 @Composable
 fun InkSectionHead(text: String) {
     Text(
-        text = text,
-        style = T.sectionHead,
+        text     = text,
+        style    = T.sectionHead,
         modifier = Modifier.padding(bottom = 6.dp)
     )
 }
 
+// ── Module row ────────────────────────────────────────────────
 @Composable
 fun InkModuleRow(
     label: String,
@@ -224,7 +280,7 @@ fun InkModuleRow(
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment     = Alignment.CenterVertically
     ) {
         Column {
             Text(text = label, style = T.bodyValue)
@@ -233,19 +289,20 @@ fun InkModuleRow(
             }
         }
         Text(
-            text = value,
+            text       = value,
             fontFamily = FontFamily.Default,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp,
-            color = valueColor
+            fontSize   = 13.sp,
+            color      = valueColor
         )
     }
     HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }
 
+// ── Morning brief ─────────────────────────────────────────────
 @Composable
 fun MorningBriefInk(brief: BriefResponse?) {
-    var isExpanded by remember { mutableStateOf(true) }
+    var isExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -254,9 +311,9 @@ fun MorningBriefInk(brief: BriefResponse?) {
             .animateContentSize()
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment     = Alignment.CenterVertically
         ) {
             Text(text = "MORNING BRIEF", style = T.sectionHead)
             Text(text = if (isExpanded) "▲" else "▼", style = T.meta)
@@ -265,18 +322,19 @@ fun MorningBriefInk(brief: BriefResponse?) {
         HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = brief?.summary ?: "Synthesising your daily insights…",
+            text      = brief?.summary ?: "Synthesising your daily insights…",
             fontFamily = FontFamily.Default,
             fontWeight = FontWeight.Normal,
-            fontSize = 14.sp,
+            fontSize  = 14.sp,
             lineHeight = 22.sp,
-            color = T.Ink,
-            maxLines = if (isExpanded) Int.MAX_VALUE else 3,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            color     = T.Ink,
+            maxLines  = if (isExpanded) Int.MAX_VALUE else 3,
+            overflow  = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
 }
 
+// ── Bottom nav ────────────────────────────────────────────────
 @Composable
 fun InkBottomNav(
     current: String,
@@ -313,11 +371,11 @@ fun InkBottomNav(
                     }
                 ) {
                     Text(
-                        text = label,
+                        text       = label,
                         fontFamily = FontFamily.Default,
                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 12.sp,
-                        color = if (isActive) T.Ink else T.Muted
+                        fontSize   = 12.sp,
+                        color      = if (isActive) T.Ink else T.Muted
                     )
                     if (isActive) {
                         Spacer(modifier = Modifier.height(2.dp))

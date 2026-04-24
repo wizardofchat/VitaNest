@@ -9,6 +9,8 @@ import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.remote.WhoopResponse
 import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.DividendDataResponse
+import com.vitanest.app.data.remote.GoalsResponse
+import com.vitanest.app.data.remote.EnergyResponse
 
 open class VitaClawRepository {
 
@@ -112,6 +114,36 @@ open class VitaClawRepository {
                 val body = response.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response body from /portfolio/dividend-data"))
+            } else {
+                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun getGoals(): Result<GoalsResponse> {
+        return try {
+            val response = apiService.getGoals()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response body from /goals"))
+            } else {
+                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun getEnergy(): Result<EnergyResponse> {
+        return try {
+            val response = apiService.getEnergy()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response body from /energy"))
             } else {
                 Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
             }

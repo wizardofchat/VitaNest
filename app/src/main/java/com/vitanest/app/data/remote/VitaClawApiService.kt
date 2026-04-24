@@ -126,8 +126,17 @@ data class DividendDataResponse(
     @SerialName("tickers") val tickers: List<DividendHolding>
 )
 
+@Serializable
+data class GoalsResponse(
+    @SerialName("income_target_gbp")       val incomeTargetGbp: Double,
+    @SerialName("income_target_date")      val incomeTargetDate: String,
+    @SerialName("withholding_tax_factor")  val withholdingTaxFactor: Double,
+    @SerialName("current_gbp")             val currentGbp: Double
+)
+
 interface VitaClawApiService {
     @GET("health")
+
     suspend fun getHealth(): Response<HealthResponse>
 
     @POST("ask")
@@ -147,4 +156,37 @@ interface VitaClawApiService {
 
     @GET("portfolio/dividend-data")
     suspend fun getDividendData(): Response<DividendDataResponse>
+
+    @GET("goals")
+    suspend fun getGoals(): Response<GoalsResponse>
+
+    @GET("energy")
+    suspend fun getEnergy(): Response<EnergyResponse>
 }
+
+@Serializable
+data class EnergyResponse(
+    val date: String,
+    @SerialName("solar_generated_kwh")    val solarGeneratedKwh: Double?,
+    @SerialName("self_consumed_kwh")      val selfConsumedKwh: Double?,
+    @SerialName("solar_exported_kwh")     val solarExportedKwh: Double?,
+    @SerialName("grid_imported_kwh")      val gridImportedKwh: Double?,
+    @SerialName("ev_total_kwh")           val evTotalKwh: Double?,
+    @SerialName("ev_solar_kwh")           val evSolarKwh: Double?,
+    @SerialName("ev_grid_kwh")            val evGridKwh: Double?,
+    @SerialName("eddi_solar_kwh")         val eddiSolarKwh: Double?,
+    @SerialName("eddi_boosted_kwh")       val eddiBoostedKwh: Double?,
+    @SerialName("home_consumption_kwh")   val homeConsumptionKwh: Double?,
+    @SerialName("ev_charging_cost_gbp")   val evChargingCostGbp: Double?,
+    @SerialName("home_import_cost_gbp")   val homeImportCostGbp: Double?,
+    @SerialName("export_earnings_gbp")    val exportEarningsGbp: Double?,
+    @SerialName("solar_savings_gbp")      val solarSavingsGbp: Double?,
+    @SerialName("energy_cost_savings_gbp") val energyCostSavingsGbp: Double?,
+    @SerialName("total_cost_gbp")         val totalCostGbp: Double?,
+    @SerialName("tariff_peak_pence")      val tariffPeakPence: Double?,
+    @SerialName("tariff_cheap_pence")     val tariffCheapPence: Double?,
+    @SerialName("tariff_export_pence")    val tariffExportPence: Double?,
+    @SerialName("charge_mode")            val chargeMode: String?,
+    @SerialName("last_updated")           val lastUpdated: String
+    // plug_state not yet in API — add when VitaClaw captures PLUG_STATES
+)
