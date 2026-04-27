@@ -11,6 +11,8 @@ import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.DividendDataResponse
 import com.vitanest.app.data.remote.GoalsResponse
 import com.vitanest.app.data.remote.EnergyResponse
+import com.vitanest.app.data.remote.ChatRequest
+import com.vitanest.app.data.remote.ChatResponse
 
 open class VitaClawRepository {
 
@@ -39,6 +41,22 @@ open class VitaClawRepository {
                 val body = response.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response body from /ask"))
+            } else {
+                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun sendChat(message: String): Result<ChatResponse> {
+        return try {
+            val request = ChatRequest(message = message)
+            val response = apiService.sendChat(request)
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response body from /chat"))
             } else {
                 Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
             }

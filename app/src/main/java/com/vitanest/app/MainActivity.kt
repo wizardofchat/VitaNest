@@ -45,10 +45,14 @@ class MainActivity : ComponentActivity() {
                                 onBack     = { navController.popBackStack() }
                             )
                         }
-                        // portfolio_detail now routes to FinanceScreen hub
-                        // FinanceScreen owns: Pies surface + Ask surface
                         composable("portfolio_detail") {
                             FinanceScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository
+                            )
+                        }
+                        composable("ask") {
+                            AskScreen(
                                 navController = navController,
                                 repository    = vitaClawRepository
                             )
@@ -60,6 +64,12 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("council") {
+                            ComingSoonScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable("soul") {
+                            ComingSoonScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable("sky") {
                             ComingSoonScreen(onBack = { navController.popBackStack() })
                         }
                         composable("dividend_simulator") {
@@ -85,7 +95,7 @@ fun ComingSoonScreen(onBack: () -> Unit) {
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            imageVector    = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
                     }

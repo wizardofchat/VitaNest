@@ -31,6 +31,19 @@ data class AskResponse(
 )
 
 @Serializable
+data class ChatRequest(
+    val message: String,
+    val source: String = "vitanest"
+)
+
+@Serializable
+data class ChatResponse(
+    val response: String,
+    val tier: String,
+    val provenance: String,
+    @SerialName("elapsed_ms") val elapsedMs: Long = 0L
+)
+@Serializable
 data class PortfolioResponse(
     @SerialName("total_value_gbp") val totalValueGbp: Double,
     @SerialName("daily_pnl_gbp") val dailyPnLGbp: Double? = 0.0,
@@ -141,6 +154,9 @@ interface VitaClawApiService {
 
     @POST("ask")
     suspend fun askQuestion(@Body request: AskRequest): Response<AskResponse>
+
+    @POST("chat")
+    suspend fun sendChat(@Body request: ChatRequest): Response<ChatResponse>
 
     @GET("portfolio")
     suspend fun getPortfolio(): Response<PortfolioResponse>

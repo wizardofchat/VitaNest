@@ -2,8 +2,8 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // FinanceAskSurface — intent chip query surface for Finance screen
-// Intents hardcoded from /capabilities contract 2026-04-22
-// Swap to live /capabilities call when VitaClaw endpoint is ready ☘️
+// Wired to POST /chat — Polars-first, LangGraph ReAct for complex queries
+// Changed: askQuestion → sendChat, AskResult maps ChatResponse fields ☘️
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,107 +36,105 @@ import kotlinx.coroutines.launch
 // ── Intent model ─────────────────────────────────────────────
 private data class FinanceIntent(
     val id: String,
-    val label: String,              // chip display text
-    val query: String,              // sent to POST /ask (may contain {input})
+    val label: String,
+    val query: String,
     val needsInput: Boolean = false,
-    val inputHint: String = "",     // placeholder in InputCard
-    val inputLabel: String = ""     // label above the text field
+    val inputHint: String = "",
+    val inputLabel: String = ""
 )
 
-// ── Intent catalogue — hardcoded from /capabilities 2026-04-22
-// When VitaClaw /capabilities is live, replace this list with the
-// parsed screens.portfolio.intents array. Nothing else changes.
+// ── Intent catalogue ──────────────────────────────────────────
 private val INCOME_INTENTS = listOf(
     FinanceIntent(
-        id = "top_dividends",
+        id    = "top_dividends",
         label = "top dividend payers",
         query = "what are my top dividend payers"
     ),
     FinanceIntent(
-        id = "bottom_dividends",
+        id    = "bottom_dividends",
         label = "worst dividend payers",
         query = "what are my worst dividend payers"
     ),
     FinanceIntent(
-        id = "monthly_income",
+        id    = "monthly_income",
         label = "monthly income",
         query = "what is my monthly dividend income"
     ),
     FinanceIntent(
-        id = "income_projection",
+        id    = "income_projection",
         label = "when will I hit £150",
         query = "when will I hit £150 per month"
     ),
     FinanceIntent(
-        id = "ticker_dividends",
-        label = "earned from ___",
-        query = "how much did I earn from {input}",
+        id         = "ticker_dividends",
+        label      = "earned from ___",
+        query      = "how much did I earn from {input}",
         needsInput = true,
         inputLabel = "Which ticker?",
-        inputHint = "e.g. JEPQ"
+        inputHint  = "e.g. JEPQ"
     ),
     FinanceIntent(
-        id = "monthly_income_by_ticker",
-        label = "who paid in ___",
-        query = "who paid me dividends in {input}",
+        id         = "monthly_income_by_ticker",
+        label      = "who paid in ___",
+        query      = "who paid me dividends in {input}",
         needsInput = true,
         inputLabel = "Which month?",
-        inputHint = "e.g. March"
+        inputHint  = "e.g. March"
     )
 )
 
 private val PERFORMANCE_INTENTS = listOf(
     FinanceIntent(
-        id = "top_positions_by_pnl",
+        id    = "top_positions_by_pnl",
         label = "winners & losers",
         query = "what are my biggest winners and losers"
     ),
     FinanceIntent(
-        id = "portfolio_summary",
+        id    = "portfolio_summary",
         label = "portfolio summary",
         query = "show me my portfolio summary"
     ),
     FinanceIntent(
-        id = "portfolio_filter",
+        id    = "portfolio_filter",
         label = "worst performers",
         query = "show me my worst performers"
     ),
     FinanceIntent(
-        id = "ticker_comparison",
-        label = "compare ___ vs ___",
-        query = "compare {input}",
+        id         = "ticker_comparison",
+        label      = "compare ___ vs ___",
+        query      = "compare {input}",
         needsInput = true,
         inputLabel = "Compare which tickers?",
-        inputHint = "e.g. JEPQ vs CTY"
+        inputHint  = "e.g. JEPQ vs CTY"
     ),
     FinanceIntent(
-        id = "dividends_breakdown",
-        label = "dividends in ___",
-        query = "show all {input} dividends",
+        id         = "dividends_breakdown",
+        label      = "dividends in ___",
+        query      = "show all {input} dividends",
         needsInput = true,
         inputLabel = "Which month?",
-        inputHint = "e.g. March"
+        inputHint  = "e.g. March"
     )
 )
 
 private val GOALS_INTENTS = listOf(
     FinanceIntent(
-        id = "dividend_calendar",
+        id    = "dividend_calendar",
         label = "next dividend",
         query = "when is my next dividend payment"
     ),
     FinanceIntent(
-        id = "tax_status",
+        id    = "tax_status",
         label = "tax status",
         query = "what is my tax status"
     ),
     FinanceIntent(
-        id = "cross_domain",
-        label = "dividends + recovery ___",
-        query = "dividends and recovery for {input}",
+        id         = "cross_domain",
+        label      = "dividends + recovery ___",
+        query      = "dividends and recovery for {input}",
         needsInput = true,
         inputLabel = "Which month?",
-        inputHint = "e.g. March"
+        inputHint  = "e.g. March"
     )
 )
 
@@ -144,29 +142,29 @@ private val GOALS_INTENTS = listOf(
 private data class AskResult(
     val answer: String,
     val tier: String,
-    val sources: List<String>
+    val provenance: String,
+    val elapsedMs: Long
 )
 
 // ── Surface root ─────────────────────────────────────────────
 @Composable
 fun FinanceAskSurface(repository: VitaClawRepository) {
-    val scope          = rememberCoroutineScope()
-    val keyboard       = LocalSoftwareKeyboardController.current
+    val scope    = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
 
-    var activeIntent   by remember { mutableStateOf<FinanceIntent?>(null) }
-    var inputValue     by remember { mutableStateOf("") }
-    var isQuerying     by remember { mutableStateOf(false) }
-    var result         by remember { mutableStateOf<AskResult?>(null) }
-    var errorMsg       by remember { mutableStateOf<String?>(null) }
+    var activeIntent by remember { mutableStateOf<FinanceIntent?>(null) }
+    var inputValue   by remember { mutableStateOf("") }
+    var isQuerying   by remember { mutableStateOf(false) }
+    var result       by remember { mutableStateOf<AskResult?>(null) }
+    var errorMsg     by remember { mutableStateOf<String?>(null) }
 
     val focusRequester = remember { FocusRequester() }
 
     fun fireQuery(intent: FinanceIntent, input: String = "") {
-        val query = if (intent.needsInput) {
+        val query = if (intent.needsInput)
             intent.query.replace("{input}", input.trim())
-        } else {
+        else
             intent.query
-        }
         if (query.contains("{input}")) return   // input not filled yet
 
         keyboard?.hide()
@@ -175,16 +173,16 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
         errorMsg   = null
 
         scope.launch {
-            val response = repository.askQuestion(query)
+            val response = repository.sendChat(query)
             isQuerying = false
             if (response.isSuccess) {
                 val body = response.getOrNull()
                 if (body != null) {
-                    // vitanest_blocked → show the message, not an error state
                     result = AskResult(
-                        answer  = body.answer,
-                        tier    = body.tier ?: "polars",
-                        sources = body.sources ?: emptyList()
+                        answer     = body.response,
+                        tier       = body.tier,
+                        provenance = body.provenance,
+                        elapsedMs  = body.elapsedMs
                     )
                 } else {
                     errorMsg = "No response from VitaClaw"
@@ -196,7 +194,7 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
     }
 
     LazyColumn(
-        modifier = Modifier
+        modifier       = Modifier
             .fillMaxSize()
             .padding(horizontal = T.screenPadding),
         contentPadding = PaddingValues(bottom = 80.dp)
@@ -205,9 +203,9 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
         item {
             IntentCategoryLabel("Income")
             IntentChipRow(
-                intents        = INCOME_INTENTS,
-                activeIntent   = activeIntent,
-                onChipTap      = { intent ->
+                intents      = INCOME_INTENTS,
+                activeIntent = activeIntent,
+                onChipTap    = { intent ->
                     activeIntent = if (activeIntent?.id == intent.id) null else intent
                     inputValue   = ""
                     result       = null
@@ -221,9 +219,9 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
         item {
             IntentCategoryLabel("Performance")
             IntentChipRow(
-                intents        = PERFORMANCE_INTENTS,
-                activeIntent   = activeIntent,
-                onChipTap      = { intent ->
+                intents      = PERFORMANCE_INTENTS,
+                activeIntent = activeIntent,
+                onChipTap    = { intent ->
                     activeIntent = if (activeIntent?.id == intent.id) null else intent
                     inputValue   = ""
                     result       = null
@@ -237,9 +235,9 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
         item {
             IntentCategoryLabel("Goals")
             IntentChipRow(
-                intents        = GOALS_INTENTS,
-                activeIntent   = activeIntent,
-                onChipTap      = { intent ->
+                intents      = GOALS_INTENTS,
+                activeIntent = activeIntent,
+                onChipTap    = { intent ->
                     activeIntent = if (activeIntent?.id == intent.id) null else intent
                     inputValue   = ""
                     result       = null
@@ -262,9 +260,7 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
                         focusRequester = focusRequester,
                         onGo           = { fireQuery(intent, inputValue) }
                     )
-                    LaunchedEffect(intent.id) {
-                        focusRequester.requestFocus()
-                    }
+                    LaunchedEffect(intent.id) { focusRequester.requestFocus() }
                 }
             }
         }
@@ -274,7 +270,7 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
             item {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier              = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center
                 ) {
                     CircularProgressIndicator(
@@ -296,7 +292,7 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
             }
         }
 
-        // ── Error state ──────────────────────────────────────
+        // ── Error ────────────────────────────────────────────
         errorMsg?.let { msg ->
             item {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -328,11 +324,6 @@ private fun IntentChipRow(
     activeIntent: FinanceIntent?,
     onChipTap: (FinanceIntent) -> Unit
 ) {
-    // Flow layout via wrapping rows — no external library needed
-    var rowStart = 0
-    val rows     = mutableListOf<List<FinanceIntent>>()
-    // Build logical rows of ≤3 — chip wrapping handled by FlowRow below
-    // Using simple Column + Row wrapping pattern
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         var remaining = intents.toMutableList()
         while (remaining.isNotEmpty()) {
@@ -341,9 +332,9 @@ private fun IntentChipRow(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 rowItems.forEach { intent ->
                     IntentChip(
-                        intent      = intent,
-                        isActive    = activeIntent?.id == intent.id,
-                        onTap       = { onChipTap(intent) }
+                        intent   = intent,
+                        isActive = activeIntent?.id == intent.id,
+                        onTap    = { onChipTap(intent) }
                     )
                 }
             }
@@ -359,20 +350,17 @@ private fun IntentChip(
     onTap: () -> Unit
 ) {
     val chipShape = RoundedCornerShape(16.dp)
-    val isDashed  = intent.needsInput    // visual distinction
+    val isDashed  = intent.needsInput
 
-    val bgColor     = when {
-        isActive && !isDashed -> T.Ink
-        else                  -> Color.White
-    }
+    val bgColor     = if (isActive && !isDashed) T.Ink else Color.White
     val textColor   = when {
         isActive && !isDashed -> T.Paper
-        isDashed              -> Color(0xFF2D5A3D)   // Shamrock
+        isDashed              -> Color(0xFF2D5A3D)
         else                  -> T.Ink
     }
     val borderColor = when {
         isActive && !isDashed -> T.Ink
-        isDashed              -> Color(0xFF2D5A3D)   // Shamrock
+        isDashed              -> Color(0xFF2D5A3D)
         else                  -> T.Rule
     }
 
@@ -380,11 +368,7 @@ private fun IntentChip(
         modifier = Modifier
             .clip(chipShape)
             .background(bgColor)
-            .border(
-                width  = if (isDashed) 0.5.dp else 0.5.dp,
-                color  = borderColor,
-                shape  = chipShape
-            )
+            .border(width = 0.5.dp, color = borderColor, shape = chipShape)
             .clickable(onClick = onTap)
             .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
@@ -424,7 +408,7 @@ private fun InputCard(
             placeholder   = {
                 Text(text = placeholder, style = T.meta, fontStyle = FontStyle.Italic)
             },
-            singleLine    = true,
+            singleLine      = true,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Characters,
                 imeAction      = ImeAction.Go
@@ -441,7 +425,7 @@ private fun InputCard(
                 fontFamily = FontFamily.Monospace,
                 fontSize   = 14.sp
             ),
-            modifier  = Modifier
+            modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
         )
@@ -459,10 +443,10 @@ private fun InputCard(
             shape = RoundedCornerShape(4.dp)
         ) {
             Text(
-                text         = "RUN QUERY",
-                fontSize     = 11.sp,
+                text          = "RUN QUERY",
+                fontSize      = 11.sp,
                 letterSpacing = 1.5.sp,
-                fontWeight   = FontWeight.Medium
+                fontWeight    = FontWeight.Medium
             )
         }
     }
@@ -483,25 +467,34 @@ private fun ResultCard(result: AskResult) {
     ) {
         lines.forEach { line ->
             when (line) {
-                is AnswerLine.Header   -> AnswerHeaderRow(line.text)
-                is AnswerLine.SubHead  -> AnswerSubHeadRow(line.text)
-                is AnswerLine.DataRow  -> AnswerDataRow(line.label, line.value)
-                is AnswerLine.Plain    -> AnswerPlainRow(line.text)
-                is AnswerLine.Divider  -> HorizontalDivider(
+                is AnswerLine.Header  -> AnswerHeaderRow(line.text)
+                is AnswerLine.SubHead -> AnswerSubHeadRow(line.text)
+                is AnswerLine.DataRow -> AnswerDataRow(line.label, line.value)
+                is AnswerLine.Plain   -> AnswerPlainRow(line.text)
+                is AnswerLine.Divider -> HorizontalDivider(
                     thickness = T.ruleThickness,
                     color     = T.Rule,
                     modifier  = Modifier.padding(vertical = 4.dp)
                 )
-                is AnswerLine.Empty    -> Spacer(modifier = Modifier.height(2.dp))
+                is AnswerLine.Empty   -> Spacer(modifier = Modifier.height(2.dp))
             }
         }
 
-        if (result.sources.isNotEmpty()) {
-            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule,
-                modifier = Modifier.padding(top = 8.dp))
+        // ── Footer: provenance + elapsed ──────────────────
+        if (result.provenance.isNotEmpty()) {
+            HorizontalDivider(
+                thickness = T.ruleThickness,
+                color     = T.Rule,
+                modifier  = Modifier.padding(top = 8.dp)
+            )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text  = "tier: ${result.tier} · ${result.sources.joinToString(" · ")}",
+                text  = result.provenance,
+                style = T.meta,
+                color = T.Muted
+            )
+            Text(
+                text  = "${result.elapsedMs}ms",
                 style = T.meta,
                 color = T.Muted
             )
@@ -511,24 +504,19 @@ private fun ResultCard(result: AskResult) {
 
 // ── Answer line types ─────────────────────────────────────────
 private sealed class AnswerLine {
-    data class Header(val text: String)                     : AnswerLine()
-    data class SubHead(val text: String)                    : AnswerLine()
-    data class DataRow(val label: String, val value: String): AnswerLine()
-    data class Plain(val text: String)                      : AnswerLine()
-    object Divider                                          : AnswerLine()
-    object Empty                                            : AnswerLine()
+    data class Header(val text: String)                      : AnswerLine()
+    data class SubHead(val text: String)                     : AnswerLine()
+    data class DataRow(val label: String, val value: String) : AnswerLine()
+    data class Plain(val text: String)                       : AnswerLine()
+    object Divider                                           : AnswerLine()
+    object Empty                                             : AnswerLine()
 }
 
 // ── Answer parser ─────────────────────────────────────────────
-// Strips HTML tags, emoji, classifies each line by its content shape
 private fun parseAnswerLines(raw: String): List<AnswerLine> {
-    // Common emoji to strip — add more as VitaClaw responses evolve
     val emojiPattern = Regex(
-        "[\uD83C-\uDBFF\uDC00-\uDFFF]|" +   // surrogate pairs
-                "[\\u2600-\\u27FF]|" +                // misc symbols
-                "[\\u2300-\\u23FF]|" +                // misc technical
-                "[\\u2700-\\u27BF]|" +                // dingbats
-                "[\u00A9\u00AE\u2122\u2139]"          // ©®™ℹ
+        "[\uD83C-\uDBFF\uDC00-\uDFFF]|[\\u2600-\\u27FF]|" +
+                "[\\u2300-\\u23FF]|[\\u2700-\\u27BF]|[\u00A9\u00AE\u2122\u2139]"
     )
 
     fun String.clean(): String = this
@@ -537,53 +525,30 @@ private fun parseAnswerLines(raw: String): List<AnswerLine> {
         .replace(Regex("\\s{2,}"), " ")
         .trim()
 
-    fun String.isBold(): Boolean =
-        this.contains("<b>") || this.contains("</b>")
+    fun String.isBold(): Boolean = contains("<b>") || contains("</b>")
 
-    fun String.isSeparator(): Boolean =
-        this.clean().matches(Regex("[-—]{3,}.*"))
-
-    fun String.isEmptyOrDashes(): Boolean =
-        this.clean().isEmpty() || this.clean().matches(Regex("[-—]+"))
-
-    val lines = raw.split("\n")
+    val lines  = raw.split("\n")
     val result = mutableListOf<AnswerLine>()
 
     for (line in lines) {
         val cleaned = line.clean()
-
         when {
-            // Skip pure empty/dash lines (the trailing dashes bug)
             cleaned.isEmpty() || cleaned.matches(Regex("[-—]+")) -> {
-                if (result.lastOrNull() !is AnswerLine.Empty) {
+                if (result.lastOrNull() !is AnswerLine.Empty)
                     result.add(AnswerLine.Empty)
-                }
             }
-
-            // Separator line
-            cleaned.matches(Regex("[-—]{3,}.*")) -> {
+            cleaned.matches(Regex("[-—]{3,}.*")) ->
                 result.add(AnswerLine.Divider)
-            }
 
-            // Bold header — <b>Some Title</b> or line ends with </b>
             line.isBold() && (cleaned.endsWith(":") || !cleaned.contains(":")) -> {
-                val headerText = cleaned.trimEnd(':')
-                result.add(AnswerLine.Header(headerText))
+                result.add(AnswerLine.Header(cleaned.trimEnd(':')))
             }
-
-            // Bold sub-header with content after colon
             line.isBold() && cleaned.contains(":") -> {
-                val parts    = cleaned.split(":", limit = 2)
-                val subLabel = parts[0].trim()
-                val subVal   = parts.getOrNull(1)?.trim() ?: ""
-                if (subVal.isEmpty()) {
-                    result.add(AnswerLine.Header(subLabel))
-                } else {
-                    result.add(AnswerLine.SubHead("$subLabel: $subVal"))
-                }
+                val parts = cleaned.split(":", limit = 2)
+                val v     = parts.getOrNull(1)?.trim() ?: ""
+                if (v.isEmpty()) result.add(AnswerLine.Header(parts[0].trim()))
+                else             result.add(AnswerLine.SubHead("${parts[0].trim()}: $v"))
             }
-
-            // Bullet data line — "• JEPQ: £27.76 (11 payments)" or "JEPQ: £27.76"
             cleaned.startsWith("•") || cleaned.startsWith("·") -> {
                 val content = cleaned.trimStart('•', '·', ' ')
                 if (content.contains(":")) {
@@ -593,38 +558,23 @@ private fun parseAnswerLines(raw: String): List<AnswerLine> {
                     result.add(AnswerLine.Plain(content))
                 }
             }
-
-            // Indented data line — "  Total:   £27.76 (11 payments)"
             line.startsWith("  ") && cleaned.contains(":") -> {
                 val parts = cleaned.split(":", limit = 2)
-                val label = parts[0].trim()
-                val value = parts.getOrNull(1)?.trim() ?: ""
-                // Skip if label looks like a ticker with £0 invested (data bug)
-                if (value.isEmpty()) {
-                    result.add(AnswerLine.Plain(cleaned))
-                } else {
-                    result.add(AnswerLine.DataRow(label, value))
-                }
+                val v     = parts.getOrNull(1)?.trim() ?: ""
+                if (v.isEmpty()) result.add(AnswerLine.Plain(cleaned))
+                else             result.add(AnswerLine.DataRow(parts[0].trim(), v))
             }
-
-            // Numbered line — "4. <b>IUKD</b>"
             cleaned.matches(Regex("\\d+\\..*")) -> {
-                val content = cleaned.replace(Regex("^\\d+\\.\\s*"), "")
-                result.add(AnswerLine.SubHead(content))
+                result.add(AnswerLine.SubHead(cleaned.replace(Regex("^\\d+\\.\\s*"), "")))
             }
-
-            // Winner/result line — "Winner: JEPQ (£27.76 total)"
             cleaned.contains(":") && cleaned.length < 80 -> {
                 val parts = cleaned.split(":", limit = 2)
                 result.add(AnswerLine.DataRow(parts[0].trim(), parts[1].trim()))
             }
-
-            // Plain text
             else -> result.add(AnswerLine.Plain(cleaned))
         }
     }
 
-    // Trim trailing empty lines
     return result.dropLastWhile { it is AnswerLine.Empty }
 }
 
@@ -661,10 +611,10 @@ private fun AnswerDataRow(label: String, value: String) {
         verticalAlignment     = Alignment.Top
     ) {
         Text(
-            text      = label,
-            fontSize  = 12.sp,
-            color     = T.Muted,
-            modifier  = Modifier.weight(1f)
+            text     = label,
+            fontSize = 12.sp,
+            color    = T.Muted,
+            modifier = Modifier.weight(1f)
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
