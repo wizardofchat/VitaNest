@@ -148,7 +148,10 @@ private data class AskResult(
 
 // ── Surface root ─────────────────────────────────────────────
 @Composable
-fun FinanceAskSurface(repository: VitaClawRepository) {
+fun FinanceAskSurface(
+    repository: VitaClawRepository,
+    onQueryComplete: (() -> Unit)? = null
+) {
     val scope    = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -184,6 +187,7 @@ fun FinanceAskSurface(repository: VitaClawRepository) {
                         provenance = body.provenance,
                         elapsedMs  = body.elapsedMs
                     )
+                    onQueryComplete?.invoke()
                 } else {
                     errorMsg = "No response from VitaClaw"
                 }

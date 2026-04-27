@@ -43,6 +43,33 @@ data class ChatResponse(
     val provenance: String,
     @SerialName("elapsed_ms") val elapsedMs: Long = 0L
 )
+
+
+// ── ADD to VitaClawApiService.kt — after ChatResponse ────────
+
+@Serializable
+data class QuotaGemini(
+    val used: Int,
+    val limit: Int,
+    val remaining: Int,
+    @SerialName("pct_used") val pctUsed: Double
+)
+
+@Serializable
+data class QuotaClaude(
+    @SerialName("spent_gbp")     val spentGbp: Double,
+    @SerialName("budget_gbp")    val budgetGbp: Double,
+    @SerialName("remaining_gbp") val remainingGbp: Double,
+    @SerialName("pct_used")      val pctUsed: Double
+)
+
+@Serializable
+data class QuotaResponse(
+    val gemini: QuotaGemini,
+    val claude: QuotaClaude,
+    val status: String          // "ok" | "quota_exceeded"
+)
+
 @Serializable
 data class PortfolioResponse(
     @SerialName("total_value_gbp") val totalValueGbp: Double,
@@ -178,7 +205,13 @@ interface VitaClawApiService {
 
     @GET("energy")
     suspend fun getEnergy(): Response<EnergyResponse>
+
+    // ADD to VitaClawApiService interface:
+    @GET("quota")
+    suspend fun getQuota(): Response<QuotaResponse>
 }
+
+
 
 @Serializable
 data class EnergyResponse(

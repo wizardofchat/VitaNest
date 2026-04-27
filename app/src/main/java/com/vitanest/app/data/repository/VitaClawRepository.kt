@@ -13,11 +13,26 @@ import com.vitanest.app.data.remote.GoalsResponse
 import com.vitanest.app.data.remote.EnergyResponse
 import com.vitanest.app.data.remote.ChatRequest
 import com.vitanest.app.data.remote.ChatResponse
+import com.vitanest.app.data.remote.QuotaResponse
 
 open class VitaClawRepository {
 
     protected val apiService = RetrofitClient.apiService
 
+    open suspend fun getQuota(): Result<QuotaResponse> {
+        return try {
+            val response = apiService.getQuota()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response body from /quota"))
+            } else {
+                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
     open suspend fun getHealth(): Result<HealthResponse> {
         return try {
             val response = apiService.getHealth()
