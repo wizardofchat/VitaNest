@@ -507,7 +507,7 @@ private fun ResultCard(result: AskResult) {
 }
 
 // ── Answer line types ─────────────────────────────────────────
-private sealed class AnswerLine {
+internal sealed class AnswerLine {
     data class Header(val text: String)                      : AnswerLine()
     data class SubHead(val text: String)                     : AnswerLine()
     data class DataRow(val label: String, val value: String) : AnswerLine()
@@ -517,7 +517,7 @@ private sealed class AnswerLine {
 }
 
 // ── Answer parser ─────────────────────────────────────────────
-private fun parseAnswerLines(raw: String): List<AnswerLine> {
+internal fun parseAnswerLines(raw: String): List<AnswerLine> {
     val emojiPattern = Regex(
         "[\uD83C-\uDBFF\uDC00-\uDFFF]|[\\u2600-\\u27FF]|" +
                 "[\\u2300-\\u23FF]|[\\u2700-\\u27BF]|[\u00A9\u00AE\u2122\u2139]"

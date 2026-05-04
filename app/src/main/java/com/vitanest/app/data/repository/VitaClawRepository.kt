@@ -1,187 +1,225 @@
 package com.vitanest.app.data.repository
 
+// © 2026 Sumeet Garg — VitaNest
+// VitaClawRepository — all API calls, single source of truth
+// Updated: sendChat offline flag + 429 handling; new chat/opening, history, intents, pending ☘️
+
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
 import com.vitanest.app.data.remote.BriefResponse
-import com.vitanest.app.data.remote.HealthResponse
-import com.vitanest.app.data.remote.PiesResponse
-import com.vitanest.app.data.remote.PortfolioResponse
-import com.vitanest.app.data.remote.WhoopResponse
-import com.vitanest.app.data.remote.RetrofitClient
-import com.vitanest.app.data.remote.DividendDataResponse
-import com.vitanest.app.data.remote.GoalsResponse
-import com.vitanest.app.data.remote.EnergyResponse
+import com.vitanest.app.data.remote.ChatHistoryResponse
+import com.vitanest.app.data.remote.ChatOpeningResponse
 import com.vitanest.app.data.remote.ChatRequest
 import com.vitanest.app.data.remote.ChatResponse
+import com.vitanest.app.data.remote.DividendDataResponse
+import com.vitanest.app.data.remote.EnergyResponse
+import com.vitanest.app.data.remote.GoalsResponse
+import com.vitanest.app.data.remote.HealthResponse
+import com.vitanest.app.data.remote.IntentsResponse
+import com.vitanest.app.data.remote.PendingOfflineResponse
+import com.vitanest.app.data.remote.PiesResponse
+import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.remote.QuotaResponse
+import com.vitanest.app.data.remote.RetrofitClient
+import com.vitanest.app.data.remote.WhoopResponse
 
 open class VitaClawRepository {
 
     protected val apiService = RetrofitClient.apiService
 
-    open suspend fun getQuota(): Result<QuotaResponse> {
-        return try {
-            val response = apiService.getQuota()
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /quota"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    // ── System ────────────────────────────────────────────────
+
     open suspend fun getHealth(): Result<HealthResponse> {
         return try {
-            val response = apiService.getHealth()
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.getHealth()
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /health"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /health"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    open suspend fun getQuota(): Result<QuotaResponse> {
+        return try {
+            val r = apiService.getQuota()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /quota"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Ask (legacy) ──────────────────────────────────────────
 
     open suspend fun askQuestion(query: String, context: String? = null): Result<AskResponse> {
         return try {
-            val request = AskRequest(query = query, context = context)
-            val response = apiService.askQuestion(request)
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.askQuestion(AskRequest(query = query, context = context))
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /ask"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /ask"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    open suspend fun sendChat(message: String): Result<ChatResponse> {
+    // ── Chat ──────────────────────────────────────────────────
+
+    open suspend fun sendChat(
+        message: String,
+        offline: Boolean = false
+    ): Result<ChatResponse> {
         return try {
-            val request = ChatRequest(message = message)
-            val response = apiService.sendChat(request)
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.sendChat(ChatRequest(message = message, offline = offline))
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /chat"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /chat"))
+            } else if (r.code() == 429) {
+                Result.failure(Exception("Daily chat limit reached (50/day). Resets at midnight."))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    open suspend fun getChatOpening(): Result<ChatOpeningResponse> {
+        return try {
+            val r = apiService.getChatOpening()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /chat/opening"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getChatHistory(): Result<ChatHistoryResponse> {
+        return try {
+            val r = apiService.getChatHistory()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /chat/history"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getChatOfflinePending(): Result<PendingOfflineResponse> {
+        return try {
+            val r = apiService.getChatOfflinePending()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /chat/offline/pending"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun ackOfflineMessage(jobId: String): Result<Unit> {
+        return try {
+            val r = apiService.ackOfflineMessage(jobId)
+            if (r.isSuccessful) Result.success(Unit)
+            else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Intents ───────────────────────────────────────────────
+
+    open suspend fun getIntents(): Result<IntentsResponse> {
+        return try {
+            val r = apiService.getIntents()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /intents"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Portfolio ─────────────────────────────────────────────
 
     open suspend fun getPortfolio(): Result<PortfolioResponse> {
         return try {
-            val response = apiService.getPortfolio()
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.getPortfolio()
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /portfolio"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /portfolio"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     open suspend fun getPortfolioPies(): Result<PiesResponse> {
         return try {
-            val response = apiService.getPortfolioPies()
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.getPortfolioPies()
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /portfolio/pies"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    open suspend fun getBrief(): Result<BriefResponse> {
-        return try {
-            val response = apiService.getBrief()
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /brief"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    open suspend fun getWhoop(): Result<WhoopResponse> {
-        return try {
-            val response = apiService.getWhoop()
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /whoop"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /portfolio/pies"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     open suspend fun getDividendData(): Result<DividendDataResponse> {
         return try {
-            val response = apiService.getDividendData()
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.getDividendData()
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /portfolio/dividend-data"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /portfolio/dividend-data"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    // ── Brief ─────────────────────────────────────────────────
+
+    open suspend fun getBrief(): Result<BriefResponse> {
+        return try {
+            val r = apiService.getBrief()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /brief"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Whoop ─────────────────────────────────────────────────
+
+    open suspend fun getWhoop(): Result<WhoopResponse> {
+        return try {
+            val r = apiService.getWhoop()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /whoop"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Goals ─────────────────────────────────────────────────
 
     open suspend fun getGoals(): Result<GoalsResponse> {
         return try {
-            val response = apiService.getGoals()
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.getGoals()
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /goals"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /goals"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    // ── Energy ────────────────────────────────────────────────
 
     open suspend fun getEnergy(): Result<EnergyResponse> {
         return try {
-            val response = apiService.getEnergy()
-            if (response.isSuccessful) {
-                val body = response.body()
+            val r = apiService.getEnergy()
+            if (r.isSuccessful) {
+                val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response body from /energy"))
-            } else {
-                Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                else Result.failure(Exception("Empty response from /energy"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
     }
 }
