@@ -1,8 +1,12 @@
 package com.vitanest.app
 
+// © 2026 Sumeet Garg — VitaNest
+// MainActivity — BuddieViewModel scoped to activity, survives tab switches ☘️
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -12,6 +16,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -20,6 +26,15 @@ import com.vitanest.app.data.repository.VitaClawRepository
 class MainActivity : ComponentActivity() {
 
     private val vitaClawRepository = VitaClawRepository()
+
+    // ViewModel scoped to activity — survives tab switches
+    private val buddieViewModel: BuddieViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                BuddieViewModel(vitaClawRepository) as T
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,8 +68,8 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("ask") {
                             AskScreen(
-                                navController = navController,
-                                repository    = vitaClawRepository
+                                navController   = navController,
+                                viewModel       = buddieViewModel
                             )
                         }
                         composable("energy") {

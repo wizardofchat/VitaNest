@@ -97,13 +97,18 @@ data class ChatHistoryEntry(
     val message: String,
     val provenance: String = "",
     @SerialName("elapsed_ms") val elapsedMs: Long = 0L,
-    val timestamp: String = ""
+    val ts: String = ""         // "2026-05-05 15:27:22.543285+00:00"
 )
 
+// API returns a flat array — deserialise as list directly
+// Repository wraps it: if response is List<ChatHistoryEntry>, use ChatHistoryResponse as wrapper
 @Serializable
 data class ChatHistoryResponse(
     val exchanges: List<ChatHistoryEntry> = emptyList()
 )
+
+// Flat array deserialiser — used when /chat/history returns [] not {"exchanges":[]}
+typealias ChatHistoryList = List<ChatHistoryEntry>
 
 // ── Intents ───────────────────────────────────────────────────
 
@@ -128,23 +133,22 @@ data class IntentsResponse(
 )
 
 // ── Offline pending ───────────────────────────────────────────
-
 @Serializable
 data class PendingOfflineItem(
-    @SerialName("job_id")     val jobId: String,
-    val query: String,
+    @SerialName("job_id")       val jobId: String,
+    val message: String,
     val response: String = "",
     val provenance: String = "",
-    @SerialName("elapsed_ms") val elapsedMs: Long = 0L,
-    val timestamp: String = ""
+    @SerialName("elapsed_ms")   val elapsedMs: Long = 0L,
+    @SerialName("completed_at") val completedAt: String = "",
+    val status: String = ""
 )
 
 @Serializable
 data class PendingOfflineResponse(
     @SerialName("pending_count") val pendingCount: Int,
-    val items: List<PendingOfflineItem> = emptyList()
+    val jobs: List<PendingOfflineItem> = emptyList()
 )
-
 // ── Portfolio ─────────────────────────────────────────────────
 
 @Serializable
@@ -346,7 +350,7 @@ interface VitaClawApiService {
     suspend fun getChatOpening(): Response<ChatOpeningResponse>
 
     @GET("chat/history")
-    suspend fun getChatHistory(): Response<ChatHistoryResponse>
+    suspend fun getChatHistory(): Response<List<ChatHistoryEntry>>
 
     @GET("chat/offline/pending")
     suspend fun getChatOfflinePending(): Response<PendingOfflineResponse>

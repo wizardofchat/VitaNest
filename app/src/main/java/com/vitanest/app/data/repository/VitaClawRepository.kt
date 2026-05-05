@@ -97,9 +97,8 @@ open class VitaClawRepository {
         return try {
             val r = apiService.getChatHistory()
             if (r.isSuccessful) {
-                val body = r.body()
-                if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response from /chat/history"))
+                val list = r.body() ?: emptyList()
+                Result.success(ChatHistoryResponse(exchanges = list))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }

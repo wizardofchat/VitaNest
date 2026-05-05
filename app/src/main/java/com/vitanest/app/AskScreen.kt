@@ -1,10 +1,14 @@
-package com.vitanest.app
+﻿package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// AskScreen — Buddie chat interface
-// Endpoints: /chat/opening · /brief · /chat · /chat/history · /intents · /chat/offline/pending
-// Rule: POST /chat on Send tap ONLY — never on load, resume, or scroll ☘️
+// AskScreen — Buddie chat, offline inbox, file upload, clear chat ☘️
+// Layout: Header → Quota → Offline Inbox → Input → Tiles → Chat
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,116 +27,70 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.vitanest.app.data.remote.BriefResponse
 import com.vitanest.app.data.remote.BriefStructured
-import com.vitanest.app.data.remote.ChatOpeningResponse
-import com.vitanest.app.data.remote.IntentItem
 import com.vitanest.app.data.remote.PendingOfflineItem
-import com.vitanest.app.data.remote.QuotaResponse
-import com.vitanest.app.data.repository.VitaClawRepository
 import com.vitanest.app.ui.theme.VitaNestTheme as T
 import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 private enum class ChatMode { AUTO, OFFLINE }
 
-private data class BubbleMsg(
-    val role: String,
-    val text: String,
-    val provenance: String = "",
-    val elapsedMs: Long = 0L,
-    val isLoading: Boolean = false,
-    val isQueued: Boolean = false
-)
-
 private val BuddyGreen = Color(0xFF2D6A4F)
 private val AmberDash  = Color(0xFFF59E0B)
+private val ErrorRed   = Color(0xFFC0392B)
 
 @Composable
 fun AskScreen(
     navController: NavController,
-    repository: VitaClawRepository
+    viewModel: BuddieViewModel
 ) {
+    val state     by viewModel.state.collectAsState()
     val scope     = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val context   = LocalContext.current
 
-    var quotaData     by remember { mutableStateOf<QuotaResponse?>(null) }
-    var quotaExpanded by remember { mutableStateOf(false) }
-    var opening       by remember { mutableStateOf<ChatOpeningResponse?>(null) }
-    var briefData     by remember { mutableStateOf<BriefResponse?>(null) }
-    var intents       by remember { mutableStateOf<List<IntentItem>>(emptyList()) }
-    var pending       by remember { mutableStateOf<List<PendingOfflineItem>>(emptyList()) }
-    var bubbles       by remember { mutableStateOf<List<BubbleMsg>>(emptyList()) }
     var inputText     by remember { mutableStateOf("") }
     var chatMode      by remember { mutableStateOf(ChatMode.AUTO) }
     var modeExpanded  by remember { mutableStateOf(false) }
     var tilesExpanded by remember { mutableStateOf(false) }
+    var quotaExpanded by remember { mutableStateOf(false) }
+    var inboxExpanded by remember { mutableStateOf(false) }
     var isSending     by remember { mutableStateOf(false) }
-    var quotaExceeded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        repository.getQuota().onSuccess { q ->
-            quotaData = q
-            quotaExceeded = q.status == "quota_exceeded"
-        }
-        repository.getChatOpening().onSuccess { o -> opening = o }
-        repository.getBrief().onSuccess { b -> briefData = b }
-        repository.getChatHistory().onSuccess { h ->
-            bubbles = h.exchanges.map { e ->
-                BubbleMsg(role = e.role, text = e.message,
-                    provenance = e.provenance, elapsedMs = e.elapsedMs)
-            }
-        }
-        repository.getChatOfflinePending().onSuccess { p -> pending = p.items }
-        repository.getIntents().onSuccess { r ->
-            intents = r.intents.filter { it.enabled }
+    LaunchedEffect(Unit) { viewModel.initialise() }
+
+    LaunchedEffect(state.bubbles.size) {
+        if (state.bubbles.isNotEmpty()) {
+            listState.animateScrollToItem(state.bubbles.size - 1)
         }
     }
 
-    // RULE: only called from Send tap or intent tile tap — never on load
-    fun sendMessage(msg: String, offline: Boolean = false) {
-        if (msg.isBlank() || isSending) return
-        val trimmed = msg.trim()
-        inputText = ""
-        isSending = true
-        bubbles = bubbles + BubbleMsg(role = "user", text = trimmed)
-        bubbles = bubbles + if (offline)
-            BubbleMsg(role = "buddy",
-                text = "Queued offline — Buddy will notify you via Telegram", isQueued = true)
-        else
-            BubbleMsg(role = "buddy", text = "…", isLoading = true)
-
-        scope.launch {
-            repository.sendChat(trimmed, offline).fold(
-                onSuccess = { resp ->
-                    bubbles = bubbles.dropLast(1) + BubbleMsg(
-                        role       = "buddy",
-                        text       = resp.response,
-                        provenance = resp.provenance,
-                        elapsedMs  = resp.elapsedMs,
-                        isQueued   = resp.asyncMode
-                    )
-                    repository.getQuota().onSuccess { q ->
-                        quotaData = q
-                        quotaExceeded = q.status == "quota_exceeded"
-                    }
-                },
-                onFailure = { err ->
-                    val errText = if (err.message?.contains("50/day") == true)
-                        "Daily limit reached (50/day). Resets at midnight."
-                    else "Could not reach VitaClaw — check Tailscale"
-                    bubbles = bubbles.dropLast(1) + BubbleMsg(role = "buddy", text = errText)
-                }
-            )
-            isSending = false
-            // Scroll to top of reversed list = latest message
-            listState.animateScrollToItem(0)
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            val text = readTextFile(context, it)
+            if (text.isNotBlank()) {
+                inputText = text.trim()
+                chatMode  = ChatMode.OFFLINE
+            }
         }
+    }
+
+    fun sendMessage() {
+        if (inputText.isBlank() || isSending) return
+        isSending = true
+        viewModel.sendMessage(inputText, chatMode == ChatMode.OFFLINE)
+        inputText = ""
+        isSending = false
     }
 
     Box(
@@ -143,7 +101,7 @@ fun AskScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = 64.dp)
+                .padding(bottom = 80.dp)
         ) {
 
             // ── Header ────────────────────────────────────────
@@ -165,10 +123,10 @@ fun AskScreen(
                         fontSize   = 22.sp,
                         color      = T.Ink
                     )
-                    opening?.let { o ->
+                    state.opening?.let { o ->
                         val pillColor = when (o.recoveryColour) {
                             "green" -> BuddyGreen
-                            "red"   -> Color(0xFFC0392B)
+                            "red"   -> ErrorRed
                             else    -> Color(0xFFD4A017)
                         }
                         Box(
@@ -189,14 +147,184 @@ fun AskScreen(
                 HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
                 Spacer(modifier = Modifier.height(4.dp))
                 QuotaTile(
-                    quota      = quotaData,
+                    quota      = state.quotaData,
                     isExpanded = quotaExpanded,
                     onToggle   = { quotaExpanded = !quotaExpanded }
                 )
             }
 
+            // ── Offline Inbox ─────────────────────────────────
+            if (state.offlineJobs.isNotEmpty()) {
+                OfflineInbox(
+                    jobs       = state.offlineJobs,
+                    expanded   = inboxExpanded,
+                    onToggle   = { inboxExpanded = !inboxExpanded },
+                    onDownload = { job ->
+                        downloadJobAsText(context, job)
+                        viewModel.ackOfflineJob(job.jobId)
+                    },
+                    onDismiss  = { job -> viewModel.ackOfflineJob(job.jobId) }
+                )
+            }
+
+            // ── Input + controls ──────────────────────────────
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = T.screenPadding, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedTextField(
+                    value         = inputText,
+                    onValueChange = { inputText = it },
+                    placeholder   = {
+                        Text(
+                            text      = if (state.quotaExceeded) "Quota exceeded"
+                            else if (chatMode == ChatMode.OFFLINE) "Offline prompt…"
+                            else "Ask Buddy…",
+                            style     = T.meta,
+                            fontStyle = FontStyle.Italic
+                        )
+                    },
+                    enabled         = !state.quotaExceeded && !isSending,
+                    singleLine      = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendMessage() }),
+                    colors          = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = if (chatMode == ChatMode.OFFLINE) AmberDash else T.Ink,
+                        unfocusedBorderColor = if (chatMode == ChatMode.OFFLINE) AmberDash.copy(alpha = 0.5f) else T.Rule,
+                        focusedTextColor     = T.Ink,
+                        unfocusedTextColor   = T.Ink,
+                        cursorColor          = T.Ink,
+                        disabledBorderColor  = T.Rule,
+                        disabledTextColor    = T.Muted
+                    ),
+                    textStyle = T.meta,
+                    modifier  = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    // File upload
+                    OutlinedButton(
+                        onClick        = { filePicker.launch(arrayOf("text/plain", "text/*")) },
+                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier       = Modifier.height(36.dp)
+                    ) {
+                        Text(text = "File", fontSize = 11.sp, color = T.Muted)
+                    }
+
+                    // Clear chat
+                    OutlinedButton(
+                        onClick        = { viewModel.clearChat() },
+                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier       = Modifier.height(36.dp)
+                    ) {
+                        Text(text = "Clear", fontSize = 11.sp, color = T.Muted)
+                    }
+
+                    // Mode dropdown
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedButton(
+                            onClick        = { modeExpanded = true },
+                            border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                            shape          = RoundedCornerShape(4.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier       = Modifier.fillMaxWidth().height(36.dp)
+                        ) {
+                            Text(
+                                text     = if (chatMode == ChatMode.OFFLINE) "Offline" else "Auto",
+                                fontSize = 11.sp,
+                                color    = if (chatMode == ChatMode.OFFLINE) AmberDash else T.Ink
+                            )
+                            Text(" ▾", fontSize = 11.sp, color = T.Muted)
+                        }
+                        DropdownMenu(
+                            expanded         = modeExpanded,
+                            onDismissRequest = { modeExpanded = false },
+                            modifier         = Modifier.background(T.Paper)
+                        ) {
+                            DropdownMenuItem(
+                                text    = { Text("Auto — Polars → Gemini", style = T.meta) },
+                                onClick = { chatMode = ChatMode.AUTO; modeExpanded = false }
+                            )
+                            DropdownMenuItem(
+                                text    = { Text("Offline — dolphin3:8b", style = T.meta) },
+                                onClick = { chatMode = ChatMode.OFFLINE; modeExpanded = false }
+                            )
+                            DropdownMenuItem(
+                                enabled = false,
+                                text    = { Text("Council — coming soon", style = T.meta, color = T.Muted) },
+                                onClick = {}
+                            )
+                        }
+                    }
+
+                    // Send / Queue
+                    Button(
+                        onClick        = { sendMessage() },
+                        enabled        = inputText.trim().isNotEmpty() && !isSending && !state.quotaExceeded,
+                        colors         = ButtonDefaults.buttonColors(
+                            containerColor         = if (chatMode == ChatMode.OFFLINE) AmberDash else T.Ink,
+                            contentColor           = T.Paper,
+                            disabledContainerColor = T.Rule,
+                            disabledContentColor   = T.Muted
+                        ),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier       = Modifier.height(36.dp)
+                    ) {
+                        Text(
+                            text       = if (chatMode == ChatMode.OFFLINE) "Queue" else "Send",
+                            fontSize   = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            // ── Quick tiles ───────────────────────────────────
+            if (state.intents.isNotEmpty()) {
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Spacer(modifier = Modifier.height(8.dp))
+                val visible = if (tilesExpanded) state.intents else state.intents.take(6)
+                LazyRow(
+                    modifier              = Modifier.padding(horizontal = T.screenPadding),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(visible) { intent ->
+                        IntentTile(
+                            label = intent.label,
+                            onTap = {
+                                inputText = intent.testQuery
+                                sendMessage()
+                            }
+                        )
+                    }
+                    if (state.intents.size > 6) {
+                        item {
+                            IntentExpandChip(
+                                expanded = tilesExpanded,
+                                count    = state.intents.size - 6,
+                                onTap    = { tilesExpanded = !tilesExpanded }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            }
+
             // ── Chat area ─────────────────────────────────────
-            if (opening == null && briefData == null && bubbles.isEmpty()) {
+            if (state.isLoading) {
                 Box(
                     modifier         = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center
@@ -214,187 +342,43 @@ fun AskScreen(
                     }
                 }
             } else {
-                // reverseLayout=true pins latest messages to bottom naturally
                 LazyColumn(
                     state          = listState,
                     modifier       = Modifier
                         .weight(1f)
                         .padding(horizontal = T.screenPadding),
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp),
-                    reverseLayout  = true
+                    contentPadding = PaddingValues(top = 12.dp, bottom = 8.dp)
                 ) {
-                    // Reversed order: latest first in list = shows at bottom on screen
-
-                    // Pending offline tiles (newest — top of reversed = bottom of screen)
-                    if (pending.isNotEmpty()) {
-                        items(pending) { p ->
-                            Spacer(modifier = Modifier.height(8.dp))
-                            PendingOfflineTile(
-                                item  = p,
-                                onAck = {
-                                    scope.launch {
-                                        repository.ackOfflineMessage(p.jobId)
-                                        pending = pending.filter { it.jobId != p.jobId }
-                                    }
-                                }
-                            )
-                        }
-                    }
-
-                    // Chat history bubbles (reversed so latest appears at bottom)
-                    items(bubbles.reversed()) { b ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        when (b.role) {
-                            "user"  -> UserBubble(b.text)
-                            "buddy" -> BuddyBubble(
-                                text       = b.text,
-                                provenance = b.provenance,
-                                elapsedMs  = b.elapsedMs,
-                                isLoading  = b.isLoading,
-                                isQueued   = b.isQueued
-                            )
-                            else -> SystemCard(b.text)
-                        }
-                    }
-
-                    // Brief card + opening summary (oldest — bottom of reversed = top of screen)
-                    item {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        briefData?.structured?.let { s ->
+                    state.briefData?.structured?.let { s ->
+                        item {
                             BriefCard(structured = s)
                             Spacer(modifier = Modifier.height(8.dp))
                         }
-                        opening?.let { o ->
+                    }
+                    state.opening?.let { o ->
+                        item {
                             BuddyBubble(text = o.summary, provenance = o.provenance)
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                    items(state.bubbles) { b ->
+                        when (b.role) {
+                            "user"  -> UserBubble(b.text, b.timeDisplay)
+                            "buddy" -> BuddyBubble(
+                                text        = b.text,
+                                provenance  = b.provenance,
+                                elapsedMs   = b.elapsedMs,
+                                isLoading   = b.isLoading,
+                                isQueued    = b.isQueued,
+                                timeDisplay = b.timeDisplay
+                            )
+                            else -> SystemCard(b.text)
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
             }
-
-            // ── Quick tiles row ───────────────────────────────
-            if (intents.isNotEmpty()) {
-                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-                Spacer(modifier = Modifier.height(8.dp))
-                val visible = if (tilesExpanded) intents else intents.take(6)
-                LazyRow(
-                    modifier              = Modifier.padding(horizontal = T.screenPadding),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(visible) { intent ->
-                        IntentTile(
-                            label = intent.label,
-                            onTap = { sendMessage(intent.testQuery) }
-                        )
-                    }
-                    if (intents.size > 6) {
-                        item {
-                            IntentExpandChip(
-                                expanded = tilesExpanded,
-                                count    = intents.size - 6,
-                                onTap    = { tilesExpanded = !tilesExpanded }
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            // ── Input row ─────────────────────────────────────
-            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-            Row(
-                modifier              = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = T.screenPadding, vertical = 8.dp),
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value         = inputText,
-                    onValueChange = { inputText = it },
-                    placeholder   = {
-                        Text(
-                            text      = if (quotaExceeded) "Quota exceeded" else "Ask Buddy…",
-                            style     = T.meta,
-                            fontStyle = FontStyle.Italic
-                        )
-                    },
-                    enabled         = !quotaExceeded && !isSending,
-                    singleLine      = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(
-                        onSend = { sendMessage(inputText, chatMode == ChatMode.OFFLINE) }
-                    ),
-                    colors   = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = T.Ink,
-                        unfocusedBorderColor = T.Rule,
-                        focusedTextColor     = T.Ink,
-                        unfocusedTextColor   = T.Ink,
-                        cursorColor          = T.Ink,
-                        disabledBorderColor  = T.Rule,
-                        disabledTextColor    = T.Muted
-                    ),
-                    textStyle = T.meta,
-                    modifier  = Modifier.weight(1f)
-                )
-
-                Box {
-                    OutlinedButton(
-                        onClick        = { modeExpanded = true },
-                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                        shape          = RoundedCornerShape(4.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier       = Modifier.height(48.dp)
-                    ) {
-                        Text(
-                            text  = if (chatMode == ChatMode.OFFLINE) "🔒" else "Auto",
-                            style = T.meta, color = T.Ink
-                        )
-                        Text(" ▾", style = T.meta, color = T.Muted)
-                    }
-                    DropdownMenu(
-                        expanded         = modeExpanded,
-                        onDismissRequest = { modeExpanded = false },
-                        modifier         = Modifier.background(T.Paper)
-                    ) {
-                        DropdownMenuItem(
-                            text    = { Text("Auto", style = T.meta) },
-                            onClick = { chatMode = ChatMode.AUTO; modeExpanded = false }
-                        )
-                        DropdownMenuItem(
-                            text    = { Text("🔒 Offline", style = T.meta) },
-                            onClick = { chatMode = ChatMode.OFFLINE; modeExpanded = false }
-                        )
-                        DropdownMenuItem(
-                            enabled = false,
-                            text    = { Text("Council — soon", style = T.meta, color = T.Muted) },
-                            onClick = {}
-                        )
-                    }
-                }
-
-                Button(
-                    onClick        = { sendMessage(inputText, chatMode == ChatMode.OFFLINE) },
-                    enabled        = inputText.trim().isNotEmpty() && !isSending && !quotaExceeded,
-                    colors         = ButtonDefaults.buttonColors(
-                        containerColor         = T.Ink,
-                        contentColor           = T.Paper,
-                        disabledContainerColor = T.Rule,
-                        disabledContentColor   = T.Muted
-                    ),
-                    shape          = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    modifier       = Modifier.height(48.dp)
-                ) {
-                    Text(
-                        text          = if (isSending) "…" else "Send",
-                        fontSize      = 12.sp,
-                        letterSpacing = 0.5.sp,
-                        fontWeight    = FontWeight.Medium
-                    )
-                }
-            }
-        } // end Column
+        }
 
         InkBottomNav(
             current       = "ask",
@@ -406,7 +390,153 @@ fun AskScreen(
     }
 }
 
-// ── Brief card — structured data above opening bubble ─────────
+// ── Offline Inbox ─────────────────────────────────────────────
+@Composable
+private fun OfflineInbox(
+    jobs: List<PendingOfflineItem>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onDownload: (PendingOfflineItem) -> Unit,
+    onDismiss: (PendingOfflineItem) -> Unit
+) {
+    val doneCount  = jobs.count { it.status == "done" }
+    val errorCount = jobs.count { it.status == "error" }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFF8E7))
+            .clickable(onClick = onToggle)
+            .animateContentSize()
+    ) {
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = T.screenPadding, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(text = "Offline Inbox", style = T.sectionHead, color = T.Ink)
+                Box(
+                    modifier = Modifier
+                        .background(AmberDash, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(text = "$doneCount", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                }
+                if (errorCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .background(ErrorRed, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(text = "$errorCount err", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Text(text = if (expanded) "▲" else "▼", style = T.meta, color = T.Muted)
+        }
+        if (expanded) {
+            HorizontalDivider(thickness = T.ruleThickness, color = AmberDash.copy(alpha = 0.3f))
+            jobs.forEach { job ->
+                OfflineJobRow(job = job, onDownload = { onDownload(job) }, onDismiss = { onDismiss(job) })
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            }
+        }
+    }
+}
+
+// ── Offline job row ───────────────────────────────────────────
+@Composable
+private fun OfflineJobRow(
+    job: PendingOfflineItem,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isError = job.status == "error"
+    Row(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = T.screenPadding, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text       = job.message,
+                fontSize   = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color      = if (isError) T.Muted else T.Ink,
+                maxLines   = 1
+            )
+            Text(
+                text  = if (isError) "Failed" else job.provenance,
+                style = T.meta,
+                color = if (isError) ErrorRed else T.Muted
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        if (isError) {
+            TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text(text = "Dismiss", fontSize = 11.sp, color = T.Muted)
+            }
+        } else {
+            Button(
+                onClick        = onDownload,
+                colors         = ButtonDefaults.buttonColors(containerColor = T.Ink, contentColor = T.Paper),
+                shape          = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp),
+                modifier       = Modifier.height(32.dp)
+            ) {
+                Text(text = "Save", fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+// ── Download job as .txt ──────────────────────────────────────
+private fun downloadJobAsText(context: Context, job: PendingOfflineItem) {
+    val content = buildString {
+        appendLine("OFFLINE RESPONSE — VitaClaw")
+        appendLine("Job ID: ${job.jobId}")
+        appendLine("Completed: ${job.completedAt}")
+        appendLine("Provenance: ${job.provenance}")
+        appendLine()
+        appendLine("QUERY:")
+        appendLine(job.message)
+        appendLine()
+        appendLine("RESPONSE:")
+        appendLine(job.response)
+    }
+    try {
+        val file = java.io.File(context.getExternalFilesDir(null), "vitaclaw_offline_${job.jobId}.txt")
+        file.writeText(content)
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.provider", file
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "VitaClaw: ${job.message.take(40)}")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Save offline response"))
+    } catch (e: Exception) { e.printStackTrace() }
+}
+
+// ── Read text file ────────────────────────────────────────────
+private fun readTextFile(context: Context, uri: Uri): String {
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BufferedReader(InputStreamReader(stream)).readText()
+        } ?: ""
+    } catch (e: Exception) { "" }
+}
+
+// ── Brief card ────────────────────────────────────────────────
 @Composable
 private fun BriefCard(structured: BriefStructured) {
     Column(
@@ -417,7 +547,6 @@ private fun BriefCard(structured: BriefStructured) {
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // ── Recovery ──────────────────────────────────────────
         val recoveryScore  = structured.recoveryScore
         val recoveryStatus = structured.recoveryStatus
         val recoveryTrend  = structured.recoveryTrend
@@ -428,75 +557,58 @@ private fun BriefCard(structured: BriefStructured) {
                 verticalAlignment     = Alignment.CenterVertically
             ) {
                 val statusColor = when {
-                    recoveryScore >= 67f -> Color(0xFF2D6A4F)
+                    recoveryScore >= 67f -> BuddyGreen
                     recoveryScore >= 34f -> Color(0xFFD4A017)
-                    else                 -> Color(0xFFC0392B)
+                    else                 -> ErrorRed
                 }
                 Text(
-                    text       = "${recoveryScore.toInt()}% ${recoveryStatus ?: ""}",
+                    text       = "${recoveryScore.toInt()}% $recoveryStatus",
                     fontSize   = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color      = statusColor
                 )
-                recoveryTrend?.let {
-                    Text(text = it, style = T.meta, color = T.Muted)
-                }
+                recoveryTrend?.let { Text(text = it, style = T.meta, color = T.Muted) }
             }
-            // HRV + RHR
             val hrv = structured.hrvMs
             val rhr = structured.rhrBpm
             if (hrv != null || rhr != null) {
                 Text(
-                    text     = listOfNotNull(
+                    text  = listOfNotNull(
                         hrv?.let { "HRV ${"%.0f".format(it)}ms" },
                         rhr?.let { "RHR ${it.toInt()}bpm" }
                     ).joinToString("  ·  "),
-                    style    = T.meta,
-                    color    = T.Muted
+                    style = T.meta, color = T.Muted
                 )
             }
         }
-
         HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-
-        // ── Portfolio ─────────────────────────────────────────
         val portVal = structured.portfolioValueGbp
         val pnl     = structured.pnlGbp
         val pnlPct  = structured.pnlPct
         if (portVal != null) {
             Row(
                 modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
             ) {
-                Text(
-                    text       = "£${"%.0f".format(portVal)}",
-                    fontSize   = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color      = T.Ink
-                )
+                Text(text = "£${"%.0f".format(portVal)}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = T.Ink)
                 if (pnl != null && pnlPct != null) {
-                    val pnlColor = if (pnl >= 0) Color(0xFF2D6A4F) else Color(0xFFC0392B)
+                    val c = if (pnl >= 0) BuddyGreen else ErrorRed
                     Text(
                         text  = "${if (pnl >= 0) "+" else ""}£${"%.0f".format(pnl)} (${"%.1f".format(pnlPct)}%)",
-                        style = T.meta,
-                        color = pnlColor
+                        style = T.meta, color = c
                     )
                 }
             }
         }
-
-        // ── Income gap ────────────────────────────────────────
         val gap    = structured.incomeGapGbp
         val target = structured.incomeTargetGbp
         if (gap != null && target != null) {
             Text(
                 text  = "£${"%.0f".format(gap)} needed for £${target.toInt()}/month target",
-                style = T.meta,
-                color = T.Muted
+                style = T.meta, color = T.Muted
             )
         }
-
-        // ── Ex-div alert ──────────────────────────────────────
         structured.exDivAlert?.let { alert ->
             if (alert.isAlert) {
                 HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
@@ -509,46 +621,36 @@ private fun BriefCard(structured: BriefStructured) {
                         text       = "⚠ ${alert.tickers} ex-div in ${alert.daysAway}d",
                         fontSize   = 12.sp,
                         fontWeight = FontWeight.Medium,
-                        color      = Color(0xFFD4A017)
+                        color      = AmberDash
                     )
-                    Text(
-                        text  = alert.date,
-                        style = T.meta,
-                        color = T.Muted
-                    )
+                    Text(text = alert.date, style = T.meta, color = T.Muted)
                 }
             }
         }
-
-        // ── Weather ───────────────────────────────────────────
         structured.weather?.let { w ->
             HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-            // Strip location prefix — show just the conditions
-            val weatherShort = w.substringAfter(":").trim()
-            Text(text = "☁ $weatherShort", style = T.meta, color = T.Muted)
+            Text(text = "☁ ${w.substringAfter(":").trim()}", style = T.meta, color = T.Muted)
         }
     }
 }
 
-// ── Buddy bubble (green, left) ────────────────────────────────
+// ── Buddy bubble ──────────────────────────────────────────────
 @Composable
 private fun BuddyBubble(
     text: String,
-    provenance: String = "",
-    elapsedMs: Long = 0L,
-    isLoading: Boolean = false,
-    isQueued: Boolean = false
+    provenance: String  = "",
+    elapsedMs: Long     = 0L,
+    isLoading: Boolean  = false,
+    isQueued: Boolean   = false,
+    timeDisplay: String = ""
 ) {
-    Column(
-        modifier            = Modifier.fillMaxWidth(0.85f),
-        horizontalAlignment = Alignment.Start
-    ) {
+    Column(modifier = Modifier.fillMaxWidth(0.85f), horizontalAlignment = Alignment.Start) {
         Box(
             modifier = Modifier
-                .background(BuddyGreen, RoundedCornerShape(
-                    topStart = 4.dp, topEnd = 12.dp,
-                    bottomEnd = 12.dp, bottomStart = 12.dp
-                ))
+                .background(
+                    BuddyGreen,
+                    RoundedCornerShape(topStart = 4.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 12.dp)
+                )
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             if (isLoading) {
@@ -568,8 +670,7 @@ private fun BuddyBubble(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(line.label, fontSize = 11.sp,
-                                    color = T.Paper.copy(alpha = 0.7f),
-                                    modifier = Modifier.weight(1f))
+                                    color = T.Paper.copy(alpha = 0.7f), modifier = Modifier.weight(1f))
                                 Text(line.value, fontSize = 11.sp,
                                     color = T.Paper, fontWeight = FontWeight.Bold)
                             }
@@ -583,20 +684,26 @@ private fun BuddyBubble(
                 }
             }
         }
-        if (provenance.isNotEmpty() && !isLoading) {
-            Spacer(modifier = Modifier.height(3.dp))
-            val footer = if (elapsedMs > 0) "$provenance · ${elapsedMs}ms" else provenance
-            Text(text = footer, style = T.meta, color = T.Muted, fontSize = 10.sp)
+        if (!isLoading) {
+            val parts = listOfNotNull(
+                provenance.ifBlank { null },
+                if (elapsedMs > 0) "${elapsedMs}ms" else null,
+                timeDisplay.ifBlank { null }
+            )
+            if (parts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(text = parts.joinToString(" · "), style = T.meta, color = T.Muted, fontSize = 10.sp)
+            }
         }
     }
 }
 
-// ── User bubble (cream, right) ────────────────────────────────
+// ── User bubble ───────────────────────────────────────────────
 @Composable
-private fun UserBubble(text: String) {
+private fun UserBubble(text: String, timeDisplay: String = "") {
     val shape = RoundedCornerShape(topStart = 12.dp, topEnd = 4.dp,
         bottomEnd = 12.dp, bottomStart = 12.dp)
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.75f)
@@ -605,6 +712,10 @@ private fun UserBubble(text: String) {
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             Text(text = text, fontSize = 13.sp, color = T.Ink, lineHeight = 18.sp)
+        }
+        if (timeDisplay.isNotEmpty()) {
+            Text(text = timeDisplay, style = T.meta, color = T.Muted,
+                fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -619,48 +730,6 @@ private fun SystemCard(text: String) {
             .padding(10.dp)
     ) {
         Text(text = text, style = T.meta, color = T.Muted)
-    }
-}
-
-// ── Pending offline tile ──────────────────────────────────────
-@Composable
-private fun PendingOfflineTile(item: PendingOfflineItem, onAck: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, AmberDash, RoundedCornerShape(8.dp))
-            .clickable { expanded = true; onAck() }
-            .padding(12.dp)
-            .animateContentSize()
-    ) {
-        Row(
-            modifier              = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            Text(text = "📥 Offline response ready", style = T.meta,
-                fontWeight = FontWeight.Medium, color = T.Ink)
-            Text(text = if (expanded) "▲" else "▼", style = T.meta, color = T.Muted)
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(text = item.query, style = T.meta, color = T.Muted,
-            maxLines = if (expanded) Int.MAX_VALUE else 1)
-        if (expanded && item.response.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider(thickness = T.ruleThickness, color = AmberDash.copy(alpha = 0.4f))
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = item.response, fontSize = 13.sp, color = T.Ink, lineHeight = 18.sp)
-            if (item.provenance.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                val footer = if (item.elapsedMs > 0)
-                    "${item.provenance} · ${item.elapsedMs}ms" else item.provenance
-                Text(text = footer, style = T.meta, color = T.Muted, fontSize = 10.sp)
-            }
-        } else if (!expanded) {
-            Text(text = "Tap to read full response", style = T.meta,
-                color = AmberDash, fontSize = 10.sp)
-        }
     }
 }
 
