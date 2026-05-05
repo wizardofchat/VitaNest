@@ -4,8 +4,7 @@ package com.vitanest.app
 // HomeScreen — turbine/shamrock canvas redesign ☘️
 // Three blades: Energy (top) · Finance (left) · Health (bottom-right)
 // Centre ring: Whoop recovery arc, colour-coded green/amber/red
-// Changed: full body replaced with Canvas turbine; LazyColumn removed;
-//          Whoop fetch added (parallel); InkBottomNav updated to 5 tabs
+// Insight line: daily quote from /brief structured.quote ☘️
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
@@ -23,7 +22,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -38,29 +36,22 @@ import kotlinx.coroutines.coroutineScope
 import kotlin.math.*
 
 // ── Blade geometry constants ──────────────────────────────────
-private const val INNER_RADIUS_DP   = 52f   // gap from ring to blade root
-private const val OUTER_RADIUS_DP   = 175f  // blade tip radius
-private const val BLADE_ARC_DEG     = 98f   // sweep of each blade sector
-private const val GAP_DEG           = 12f   // visual gap between blade tips
-private const val BLADE_TAPER_DEG   = 36f   // inner narrowing for tapered root
-private const val RING_RADIUS_DP    = 50f
-private const val RING_STROKE_DP    = 10f
-private const val RING_INNER_DP     = 28f
-private val BLADE_FILL              = Color(0xFF2D6A4F)
-private val BLADE_STROKE            = Color(0xFF1B4332)
-private val BLADE_LABEL_COLOR       = Color(0xFFF2EFE8)
-private val BLADE_METRIC_COLOR      = Color(0xFFA8D5BC)
+private const val INNER_RADIUS_DP = 52f
+private const val OUTER_RADIUS_DP = 175f
+private const val BLADE_ARC_DEG   = 98f
+private const val BLADE_TAPER_DEG = 36f
+private const val RING_RADIUS_DP  = 50f
+private const val RING_STROKE_DP  = 10f
+private const val RING_INNER_DP   = 28f
+private val BLADE_FILL            = Color(0xFF2D6A4F)
+private val BLADE_STROKE          = Color(0xFF1B4332)
+private val BLADE_LABEL_COLOR     = Color(0xFFF2EFE8)
+private val BLADE_METRIC_COLOR    = Color(0xFFA8D5BC)
 
-// Blade rotation offsets (clockwise from top = 0°)
-// Energy=top(−90°), Finance=left(−90+120=30° → 150°), Health=bottom-right(−90+240=150° → 270°)
-// In Canvas coordinates (0° = right, CW positive):
-// Energy top     → −90°  (i.e. 270°)
-// Finance left   → 150°
-// Health br      → 30°
 private val BLADE_ANGLES = listOf(
-    Triple("Energy",  -90f, 0),   // top
-    Triple("Finance", 150f, 1),   // left
-    Triple("Health",  30f,  2),   // bottom-right
+    Triple("Energy",  -90f, 0),
+    Triple("Finance", 150f, 1),
+    Triple("Health",   30f, 2),
 )
 
 @Composable
@@ -75,7 +66,6 @@ fun HomeScreen(
     var agenticScore  by remember { mutableIntStateOf(0) }
     var isOnline      by remember { mutableStateOf(false) }
 
-    // ── Parallel calls ────────────────────────────────────────
     LaunchedEffect(Unit) {
         coroutineScope {
             val healthDeferred    = async { repository.getHealth() }
@@ -103,7 +93,7 @@ fun HomeScreen(
         }
     }
 
-    // ── Blade fade-in animation (120ms stagger) ───────────────
+    // ── Blade fade-in (120ms stagger) ────────────────────────
     val blade0Alpha by produceState(0f) {
         kotlinx.coroutines.delay(0)
         animate(0f, 1f, animationSpec = tween(300)) { v, _ -> value = v }
@@ -118,12 +108,11 @@ fun HomeScreen(
     }
     val bladeAlphas = listOf(blade0Alpha, blade1Alpha, blade2Alpha)
 
-    // ── Recovery arc animation ────────────────────────────────
     val recoveryScore = whoopData?.recoveryScore ?: 0f
     val arcAnim by animateFloatAsState(
-        targetValue  = recoveryScore,
+        targetValue   = recoveryScore,
         animationSpec = tween(300, easing = EaseOutCubic),
-        label        = "recovery_arc"
+        label         = "recovery_arc"
     )
 
     Box(
@@ -139,7 +128,7 @@ fun HomeScreen(
             // ── Header ────────────────────────────────────────
             Spacer(modifier = Modifier.height(36.dp))
             Row(
-                modifier = Modifier
+                modifier              = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -156,13 +145,14 @@ fun HomeScreen(
             }
             HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
 
-            // ── Insight line ──────────────────────────────────
-            val insightText = briefData?.summary
-                ?.split(".")
-                ?.firstOrNull { it.isNotBlank() }
-                ?.trim()
-                ?.let { "$it." }
-                ?: "Synthesising daily insights…"
+            // ── Quote insight line ────────────────────────────
+            val quote       = briefData?.structured?.quote
+            val quoteAuthor = briefData?.structured?.quoteAuthor
+            val insightText = when {
+                quote != null && quoteAuthor != null -> "\"$quote\" — $quoteAuthor"
+                quote != null                        -> "\"$quote\""
+                else                                 -> "Synthesising daily insights…"
+            }
 
             Text(
                 text       = insightText,
@@ -180,7 +170,7 @@ fun HomeScreen(
 
             // ── Turbine canvas ────────────────────────────────
             Box(
-                modifier = Modifier
+                modifier         = Modifier
                     .fillMaxWidth()
                     .weight(1f),
                 contentAlignment = Alignment.Center
@@ -200,7 +190,6 @@ fun HomeScreen(
             }
         }
 
-        // ── Bottom nav ────────────────────────────────────────
         InkBottomNav(
             current       = "home",
             navController = navController,
@@ -222,51 +211,35 @@ private fun TurbineCanvas(
     recoveryArc: Float,
     modifier: Modifier = Modifier
 ) {
-    // Pre-build blade label strings
     val bladeLabels = remember(energyData, portfolioData, whoopData) {
         listOf(
-            // Energy blade
-            Pair(
-                "Energy",
-                buildString {
-                    energyData?.solarGeneratedKwh?.let { append("${"%.1f".format(it)} kWh") }
-                        ?: append("—")
-                    energyData?.chargeMode?.takeIf { it != "None" && it.isNotBlank() }
-                        ?.let { append("  $it") }
-                }
-            ),
-            // Finance blade
-            Pair(
-                "Finance",
-                buildString {
-                    val pnl = portfolioData?.dailyPnLGbp
-                    if (pnl != null) {
-                        append("${if (pnl >= 0) "+" else ""}£${"%.2f".format(pnl)}")
-                    } else {
-                        append("—")
+            Pair("Energy", buildString {
+                energyData?.solarGeneratedKwh?.let { append("${"%.1f".format(it)} kWh") }
+                    ?: append("—")
+                energyData?.chargeMode?.takeIf { it != "None" && it.isNotBlank() }
+                    ?.let { append("  $it") }
+            }),
+            Pair("Finance", buildString {
+                val pnl = portfolioData?.dailyPnLGbp
+                if (pnl != null) append("${if (pnl >= 0) "+" else ""}£${"%.2f".format(pnl)}")
+                else append("—")
+            }),
+            Pair("Health", buildString {
+                whoopData?.let { w ->
+                    if (w.hrvRmssdMilli > 0f) append("HRV ${"%.0f".format(w.hrvRmssdMilli)}")
+                    if (w.sleepPerformance > 0f) {
+                        if (isNotEmpty()) append("  ")
+                        append("Sleep ${w.sleepPerformance.toInt()}%")
                     }
-                }
-            ),
-            // Health blade
-            Pair(
-                "Health",
-                buildString {
-                    whoopData?.let { w ->
-                        if (w.hrvRmssdMilli > 0f) append("HRV ${"%.0f".format(w.hrvRmssdMilli)}")
-                        if (w.sleepPerformance > 0f) {
-                            if (isNotEmpty()) append("  ")
-                            append("Sleep ${w.sleepPerformance.toInt()}%")
-                        }
-                    } ?: append("—")
-                }
-            )
+                } ?: append("—")
+            })
         )
     }
 
     Box(modifier = modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val cx      = size.width / 2f
-            val cy      = size.height * 0.45f  // bias upward — prevents bottom clip
+            val cy      = size.height * 0.45f
             val innerR  = INNER_RADIUS_DP.dp.toPx()
             val outerR  = OUTER_RADIUS_DP.dp.toPx()
             val ringR   = RING_RADIUS_DP.dp.toPx()
@@ -274,7 +247,6 @@ private fun TurbineCanvas(
             val innerCircR = RING_INNER_DP.dp.toPx()
             val centre  = Offset(cx, cy)
 
-            // Draw blades
             BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
                 drawBlade(
                     centre   = centre,
@@ -286,8 +258,8 @@ private fun TurbineCanvas(
             }
 
             // Stem
-            val stemW  = 6.dp.toPx()
-            val stemH  = 24.dp.toPx()
+            val stemW   = 6.dp.toPx()
+            val stemH   = 24.dp.toPx()
             val stemTop = cy + ringR + ringStr / 2f
             drawRoundRect(
                 color        = Color(0xFFC8C4BB).copy(alpha = 0.45f),
@@ -295,7 +267,6 @@ private fun TurbineCanvas(
                 size         = androidx.compose.ui.geometry.Size(stemW, stemH),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
             )
-            // Oval shadow below stem
             drawOval(
                 color   = Color(0xFFC8C4BB).copy(alpha = 0.25f),
                 topLeft = Offset(cx - stemW * 1.5f, stemTop + stemH),
@@ -311,11 +282,7 @@ private fun TurbineCanvas(
             )
 
             // Ring track
-            drawCircle(
-                color  = T.Paper,
-                radius = ringR,
-                center = centre
-            )
+            drawCircle(color = T.Paper, radius = ringR, center = centre)
             drawCircle(
                 color  = Color(0xFFE8E4DC),
                 radius = ringR,
@@ -337,20 +304,14 @@ private fun TurbineCanvas(
             )
 
             // Inner cream circle
-            drawCircle(
-                color  = T.Paper,
-                radius = innerCircR,
-                center = centre
-            )
+            drawCircle(color = T.Paper, radius = innerCircR, center = centre)
         }
 
-        // ── Blade click targets (invisible boxes over each blade) ─
-        // We place clickable Box overlays at approximate blade positions
+        // Blade click targets
         val bladeNavRoutes = listOf("energy", "portfolio_detail", "sicksense")
         BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
             val radians = Math.toRadians(angleDeg.toDouble())
             val midR    = (INNER_RADIUS_DP + OUTER_RADIUS_DP) / 2f
-            // Offset box centre proportionally — layout in dp
             val offsetX = (midR * cos(radians)).dp
             val offsetY = (midR * sin(radians)).dp
             Box(
@@ -362,7 +323,7 @@ private fun TurbineCanvas(
             )
         }
 
-        // ── Centre ring click target ──────────────────────────
+        // Centre ring click
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -370,14 +331,13 @@ private fun TurbineCanvas(
                 .clickable { navController.navigate("sicksense") }
         )
 
-        // ── Centre text (score + label) ───────────────────────
+        // Centre text
         Column(
             modifier            = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             val score = if ((whoopData?.recoveryScore ?: 0f) > 0f)
-                "${whoopData!!.recoveryScore.toInt()}"
-            else "—"
+                "${whoopData!!.recoveryScore.toInt()}" else "—"
             Text(
                 text       = score,
                 fontFamily = T.Serif,
@@ -394,15 +354,13 @@ private fun TurbineCanvas(
             )
         }
 
-        // ── Blade labels (drawn via Text composables) ─────────
-        // Positioned at each blade's visual centre
+        // Blade labels
         BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
             val (domainLabel, metricLabel) = bladeLabels[i]
             val radians = Math.toRadians(angleDeg.toDouble())
             val midR    = (INNER_RADIUS_DP + OUTER_RADIUS_DP) / 2f + 8f
             val offsetX = (midR * cos(radians)).dp
             val offsetY = (midR * sin(radians)).dp
-
             Column(
                 modifier            = Modifier
                     .align(Alignment.Center)
@@ -427,24 +385,18 @@ private fun TurbineCanvas(
     }
 }
 
-// ── Blade path drawing ────────────────────────────────────────
-// Parametric swept sector: midAngle is the blade's centre axis.
-// Inner edges are tapered by BLADE_TAPER_DEG for visual lean.
+// ── Blade path ────────────────────────────────────────────────
 private fun DrawScope.drawBlade(
     centre: Offset,
     innerR: Float,
     outerR: Float,
-    midAngle: Float,    // degrees, 0=right, CW+
+    midAngle: Float,
     alpha: Float
 ) {
     val halfArc   = BLADE_ARC_DEG / 2f
     val halfTaper = BLADE_TAPER_DEG / 2f
 
-    // Outer arc: midAngle ± halfArc
     val outerStartDeg = midAngle - halfArc
-    val outerEndDeg   = midAngle + halfArc
-
-    // Inner edge: narrower than outer by taper
     val innerStartDeg = midAngle - halfTaper
     val innerEndDeg   = midAngle + halfTaper
 
@@ -457,38 +409,29 @@ private fun DrawScope.drawBlade(
     }
 
     val path = Path().apply {
-        // Start at inner-start corner
         val p0 = angToOffset(innerStartDeg, innerR)
         moveTo(p0.x, p0.y)
-
-        // Line to outer-start corner
         val p1 = angToOffset(outerStartDeg, outerR)
         lineTo(p1.x, p1.y)
-
-        // Arc along outer edge from outerStart → outerEnd
-        val left   = centre.x - outerR
-        val top    = centre.y - outerR
-        val oSize  = androidx.compose.ui.geometry.Size(outerR * 2, outerR * 2)
+        val left  = centre.x - outerR
+        val top   = centre.y - outerR
+        val oSize = androidx.compose.ui.geometry.Size(outerR * 2, outerR * 2)
         arcTo(
-            rect        = androidx.compose.ui.geometry.Rect(left, top, left + oSize.width, top + oSize.height),
+            rect              = androidx.compose.ui.geometry.Rect(left, top, left + oSize.width, top + oSize.height),
             startAngleDegrees = outerStartDeg,
             sweepAngleDegrees = BLADE_ARC_DEG,
-            forceMoveTo = false
+            forceMoveTo       = false
         )
-
-        // Line back to inner-end corner
         val p3 = angToOffset(innerEndDeg, innerR)
         lineTo(p3.x, p3.y)
-
-        // Small arc along inner edge back to start (concave notch)
-        val iLeft  = centre.x - innerR
-        val iTop   = centre.y - innerR
-        val iSize  = androidx.compose.ui.geometry.Size(innerR * 2, innerR * 2)
+        val iLeft = centre.x - innerR
+        val iTop  = centre.y - innerR
+        val iSize = androidx.compose.ui.geometry.Size(innerR * 2, innerR * 2)
         arcTo(
-            rect        = androidx.compose.ui.geometry.Rect(iLeft, iTop, iLeft + iSize.width, iTop + iSize.height),
+            rect              = androidx.compose.ui.geometry.Rect(iLeft, iTop, iLeft + iSize.width, iTop + iSize.height),
             startAngleDegrees = innerEndDeg,
             sweepAngleDegrees = -(innerEndDeg - innerStartDeg),
-            forceMoveTo = false
+            forceMoveTo       = false
         )
         close()
     }
@@ -499,12 +442,12 @@ private fun DrawScope.drawBlade(
 
 // ── Recovery arc colour ───────────────────────────────────────
 private fun recoveryArcColor(score: Float) = when {
-    score >= 67f -> Color(0xFF5A9E6F)  // green
-    score >= 34f -> Color(0xFFD4A017)  // amber
-    else         -> Color(0xFFC0392B)  // red
+    score >= 67f -> Color(0xFF5A9E6F)
+    score >= 34f -> Color(0xFFD4A017)
+    else         -> Color(0xFFC0392B)
 }
 
-// ── Stamp (unchanged) ─────────────────────────────────────────
+// ── Stamp ─────────────────────────────────────────────────────
 @Composable
 fun InkStamp(label: String, isOnline: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -527,7 +470,7 @@ fun InkStamp(label: String, isOnline: Boolean) {
     }
 }
 
-// ── Section head (unchanged) ──────────────────────────────────
+// ── Section head ──────────────────────────────────────────────
 @Composable
 fun InkSectionHead(text: String) {
     Text(
@@ -537,7 +480,7 @@ fun InkSectionHead(text: String) {
     )
 }
 
-// ── Module row (unchanged) ────────────────────────────────────
+// ── Module row ────────────────────────────────────────────────
 @Composable
 fun InkModuleRow(
     label: String,
@@ -569,7 +512,7 @@ fun InkModuleRow(
     HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }
 
-// ── Morning brief (unchanged) ─────────────────────────────────
+// ── Morning brief (kept for reference, not rendered on screen) ─
 @Composable
 fun MorningBriefInk(brief: BriefResponse?) {
     var isExpanded by remember { mutableStateOf(false) }
@@ -603,16 +546,15 @@ fun MorningBriefInk(brief: BriefResponse?) {
     }
 }
 
-// ── Bottom nav — updated to 5 tabs ────────────────────────────
+// ── Bottom nav ────────────────────────────────────────────────
 @Composable
 fun InkBottomNav(
     current: String,
     navController: NavController,
     modifier: Modifier = Modifier
 ) {
-    // route, label, navigate-to
     val items = listOf(
-        Triple("home",             "Home ☘️",  "home"),
+        Triple("home",             "Home ☘️", "home"),
         Triple("portfolio_detail", "Finance",  "portfolio_detail"),
         Triple("energy",           "Energy",   "energy"),
         Triple("sicksense",        "Health",   "sicksense"),
@@ -632,10 +574,8 @@ fun InkBottomNav(
                 val isActive = current == route
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.clickable {
-                        navController.navigate(destination) {
-                            launchSingleTop = true
-                        }
+                    modifier            = Modifier.clickable {
+                        navController.navigate(destination) { launchSingleTop = true }
                     }
                 ) {
                     Text(

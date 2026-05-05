@@ -1,8 +1,8 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// AskScreen — Buddie chat interface, replaces FinanceAskSurface
-// Endpoints: /chat/opening · /chat · /chat/history · /intents · /chat/offline/pending
+// AskScreen — Buddie chat interface
+// Endpoints: /chat/opening · /brief · /chat · /chat/history · /intents · /chat/offline/pending
 // Rule: POST /chat on Send tap ONLY — never on load, resume, or scroll ☘️
 
 import androidx.compose.animation.animateContentSize
@@ -29,6 +29,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.vitanest.app.data.remote.BriefResponse
+import com.vitanest.app.data.remote.BriefStructured
 import com.vitanest.app.data.remote.ChatOpeningResponse
 import com.vitanest.app.data.remote.IntentItem
 import com.vitanest.app.data.remote.PendingOfflineItem
@@ -62,6 +64,7 @@ fun AskScreen(
     var quotaData     by remember { mutableStateOf<QuotaResponse?>(null) }
     var quotaExpanded by remember { mutableStateOf(false) }
     var opening       by remember { mutableStateOf<ChatOpeningResponse?>(null) }
+    var briefData     by remember { mutableStateOf<BriefResponse?>(null) }
     var intents       by remember { mutableStateOf<List<IntentItem>>(emptyList()) }
     var pending       by remember { mutableStateOf<List<PendingOfflineItem>>(emptyList()) }
     var bubbles       by remember { mutableStateOf<List<BubbleMsg>>(emptyList()) }
@@ -78,6 +81,7 @@ fun AskScreen(
             quotaExceeded = q.status == "quota_exceeded"
         }
         repository.getChatOpening().onSuccess { o -> opening = o }
+        repository.getBrief().onSuccess { b -> briefData = b }
         repository.getChatHistory().onSuccess { h ->
             bubbles = h.exchanges.map { e ->
                 BubbleMsg(role = e.role, text = e.message,
@@ -98,12 +102,12 @@ fun AskScreen(
         isSending = true
         bubbles = bubbles + BubbleMsg(role = "user", text = trimmed)
         bubbles = bubbles + if (offline)
-            BubbleMsg(role = "buddy", text = "Queued offline — Buddy will notify you via Telegram", isQueued = true)
+            BubbleMsg(role = "buddy",
+                text = "Queued offline — Buddy will notify you via Telegram", isQueued = true)
         else
             BubbleMsg(role = "buddy", text = "…", isLoading = true)
 
         scope.launch {
-            listState.animateScrollToItem(bubbles.size - 1)
             repository.sendChat(trimmed, offline).fold(
                 onSuccess = { resp ->
                     bubbles = bubbles.dropLast(1) + BubbleMsg(
@@ -121,23 +125,21 @@ fun AskScreen(
                 onFailure = { err ->
                     val errText = if (err.message?.contains("50/day") == true)
                         "Daily limit reached (50/day). Resets at midnight."
-                    else
-                        "Could not reach VitaClaw — check Tailscale"
+                    else "Could not reach VitaClaw — check Tailscale"
                     bubbles = bubbles.dropLast(1) + BubbleMsg(role = "buddy", text = errText)
                 }
             )
             isSending = false
-            listState.animateScrollToItem(bubbles.size - 1)
+            // Scroll to top of reversed list = latest message
+            listState.animateScrollToItem(0)
         }
     }
 
-    // ── Root ──────────────────────────────────────────────────
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(T.Paper)
     ) {
-        // Main content column — padded above nav bar
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -165,7 +167,7 @@ fun AskScreen(
                     )
                     opening?.let { o ->
                         val pillColor = when (o.recoveryColour) {
-                            "green" -> Color(0xFF2D6A4F)
+                            "green" -> BuddyGreen
                             "red"   -> Color(0xFFC0392B)
                             else    -> Color(0xFFD4A017)
                         }
@@ -194,8 +196,7 @@ fun AskScreen(
             }
 
             // ── Chat area ─────────────────────────────────────
-            if (opening == null && bubbles.isEmpty()) {
-                // Loading state — centered while brief loads
+            if (opening == null && briefData == null && bubbles.isEmpty()) {
                 Box(
                     modifier         = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center
@@ -213,33 +214,18 @@ fun AskScreen(
                     }
                 }
             } else {
+                // reverseLayout=true pins latest messages to bottom naturally
                 LazyColumn(
                     state          = listState,
                     modifier       = Modifier
                         .weight(1f)
                         .padding(horizontal = T.screenPadding),
-                    contentPadding = PaddingValues(bottom = 8.dp)
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp),
+                    reverseLayout  = true
                 ) {
-                    opening?.let { o ->
-                        item {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            BuddyBubble(text = o.summary, provenance = o.provenance)
-                        }
-                    }
-                    items(bubbles) { b ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        when (b.role) {
-                            "user"  -> UserBubble(b.text)
-                            "buddy" -> BuddyBubble(
-                                text       = b.text,
-                                provenance = b.provenance,
-                                elapsedMs  = b.elapsedMs,
-                                isLoading  = b.isLoading,
-                                isQueued   = b.isQueued
-                            )
-                            else -> SystemCard(b.text)
-                        }
-                    }
+                    // Reversed order: latest first in list = shows at bottom on screen
+
+                    // Pending offline tiles (newest — top of reversed = bottom of screen)
                     if (pending.isNotEmpty()) {
                         items(pending) { p ->
                             Spacer(modifier = Modifier.height(8.dp))
@@ -254,8 +240,37 @@ fun AskScreen(
                             )
                         }
                     }
+
+                    // Chat history bubbles (reversed so latest appears at bottom)
+                    items(bubbles.reversed()) { b ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        when (b.role) {
+                            "user"  -> UserBubble(b.text)
+                            "buddy" -> BuddyBubble(
+                                text       = b.text,
+                                provenance = b.provenance,
+                                elapsedMs  = b.elapsedMs,
+                                isLoading  = b.isLoading,
+                                isQueued   = b.isQueued
+                            )
+                            else -> SystemCard(b.text)
+                        }
+                    }
+
+                    // Brief card + opening summary (oldest — bottom of reversed = top of screen)
+                    item {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        briefData?.structured?.let { s ->
+                            BriefCard(structured = s)
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        opening?.let { o ->
+                            BuddyBubble(text = o.summary, provenance = o.provenance)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                 }
-            } // end chat area
+            }
 
             // ── Quick tiles row ───────────────────────────────
             if (intents.isNotEmpty()) {
@@ -263,7 +278,7 @@ fun AskScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 val visible = if (tilesExpanded) intents else intents.take(6)
                 LazyRow(
-                    modifier            = Modifier.padding(horizontal = T.screenPadding),
+                    modifier              = Modifier.padding(horizontal = T.screenPadding),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(visible) { intent ->
@@ -333,8 +348,7 @@ fun AskScreen(
                     ) {
                         Text(
                             text  = if (chatMode == ChatMode.OFFLINE) "🔒" else "Auto",
-                            style = T.meta,
-                            color = T.Ink
+                            style = T.meta, color = T.Ink
                         )
                         Text(" ▾", style = T.meta, color = T.Muted)
                     }
@@ -382,7 +396,6 @@ fun AskScreen(
             }
         } // end Column
 
-        // Nav bar — overlay at bottom of Box
         InkBottomNav(
             current       = "ask",
             navController = navController,
@@ -390,7 +403,131 @@ fun AskScreen(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
         )
-    } // end Box
+    }
+}
+
+// ── Brief card — structured data above opening bubble ─────────
+@Composable
+private fun BriefCard(structured: BriefStructured) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.5.dp, T.Rule, RoundedCornerShape(8.dp))
+            .background(Color.White, RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // ── Recovery ──────────────────────────────────────────
+        val recoveryScore  = structured.recoveryScore
+        val recoveryStatus = structured.recoveryStatus
+        val recoveryTrend  = structured.recoveryTrend
+        if (recoveryScore != null) {
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                val statusColor = when {
+                    recoveryScore >= 67f -> Color(0xFF2D6A4F)
+                    recoveryScore >= 34f -> Color(0xFFD4A017)
+                    else                 -> Color(0xFFC0392B)
+                }
+                Text(
+                    text       = "${recoveryScore.toInt()}% ${recoveryStatus ?: ""}",
+                    fontSize   = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = statusColor
+                )
+                recoveryTrend?.let {
+                    Text(text = it, style = T.meta, color = T.Muted)
+                }
+            }
+            // HRV + RHR
+            val hrv = structured.hrvMs
+            val rhr = structured.rhrBpm
+            if (hrv != null || rhr != null) {
+                Text(
+                    text     = listOfNotNull(
+                        hrv?.let { "HRV ${"%.0f".format(it)}ms" },
+                        rhr?.let { "RHR ${it.toInt()}bpm" }
+                    ).joinToString("  ·  "),
+                    style    = T.meta,
+                    color    = T.Muted
+                )
+            }
+        }
+
+        HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+
+        // ── Portfolio ─────────────────────────────────────────
+        val portVal = structured.portfolioValueGbp
+        val pnl     = structured.pnlGbp
+        val pnlPct  = structured.pnlPct
+        if (portVal != null) {
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text       = "£${"%.0f".format(portVal)}",
+                    fontSize   = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = T.Ink
+                )
+                if (pnl != null && pnlPct != null) {
+                    val pnlColor = if (pnl >= 0) Color(0xFF2D6A4F) else Color(0xFFC0392B)
+                    Text(
+                        text  = "${if (pnl >= 0) "+" else ""}£${"%.0f".format(pnl)} (${"%.1f".format(pnlPct)}%)",
+                        style = T.meta,
+                        color = pnlColor
+                    )
+                }
+            }
+        }
+
+        // ── Income gap ────────────────────────────────────────
+        val gap    = structured.incomeGapGbp
+        val target = structured.incomeTargetGbp
+        if (gap != null && target != null) {
+            Text(
+                text  = "£${"%.0f".format(gap)} needed for £${target.toInt()}/month target",
+                style = T.meta,
+                color = T.Muted
+            )
+        }
+
+        // ── Ex-div alert ──────────────────────────────────────
+        structured.exDivAlert?.let { alert ->
+            if (alert.isAlert) {
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text       = "⚠ ${alert.tickers} ex-div in ${alert.daysAway}d",
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color      = Color(0xFFD4A017)
+                    )
+                    Text(
+                        text  = alert.date,
+                        style = T.meta,
+                        color = T.Muted
+                    )
+                }
+            }
+        }
+
+        // ── Weather ───────────────────────────────────────────
+        structured.weather?.let { w ->
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            // Strip location prefix — show just the conditions
+            val weatherShort = w.substringAfter(":").trim()
+            Text(text = "☁ $weatherShort", style = T.meta, color = T.Muted)
+        }
+    }
 }
 
 // ── Buddy bubble (green, left) ────────────────────────────────
@@ -431,7 +568,8 @@ private fun BuddyBubble(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(line.label, fontSize = 11.sp,
-                                    color = T.Paper.copy(alpha = 0.7f), modifier = Modifier.weight(1f))
+                                    color = T.Paper.copy(alpha = 0.7f),
+                                    modifier = Modifier.weight(1f))
                                 Text(line.value, fontSize = 11.sp,
                                     color = T.Paper, fontWeight = FontWeight.Bold)
                             }

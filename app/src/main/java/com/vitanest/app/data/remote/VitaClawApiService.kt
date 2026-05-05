@@ -190,9 +190,48 @@ data class PieItem(
 // ── Brief ─────────────────────────────────────────────────────
 
 @Serializable
+data class ExDivAlert(
+    val tickers: String,
+    @SerialName("days_away") val daysAway: Int,
+    val date: String,
+    @SerialName("is_alert") val isAlert: Boolean
+)
+
+@Serializable
+data class BuddieInsights(
+    val whoop: String? = null,
+    val t212: String? = null,
+    val myenergi: String? = null
+)
+
+@Serializable
+data class BriefStructured(
+    @SerialName("recovery_score")      val recoveryScore: Float? = null,
+    @SerialName("recovery_status")     val recoveryStatus: String? = null,
+    @SerialName("recovery_trend")      val recoveryTrend: String? = null,
+    @SerialName("hrv_ms")              val hrvMs: Float? = null,
+    @SerialName("rhr_bpm")             val rhrBpm: Float? = null,
+    @SerialName("spo2_pct")            val spo2Pct: Float? = null,
+    @SerialName("training_advice")     val trainingAdvice: String? = null,
+    @SerialName("portfolio_value_gbp") val portfolioValueGbp: Float? = null,
+    @SerialName("pnl_gbp")             val pnlGbp: Float? = null,
+    @SerialName("pnl_pct")             val pnlPct: Float? = null,
+    @SerialName("divs_this_month_gbp") val divsThisMonthGbp: Float? = null,
+    @SerialName("income_target_gbp")   val incomeTargetGbp: Float? = null,
+    @SerialName("income_gap_gbp")      val incomeGapGbp: Float? = null,
+    @SerialName("ex_div_alert")        val exDivAlert: ExDivAlert? = null,
+    @SerialName("weather")             val weather: String? = null,
+    @SerialName("buddie_insights")     val buddieInsights: BuddieInsights? = null,
+    @SerialName("agents_healthy")      val agentsHealthy: Boolean? = null,
+    @SerialName("quote")               val quote: String? = null,
+    @SerialName("quote_author")        val quoteAuthor: String? = null
+)
+
+@Serializable
 data class BriefResponse(
-    val summary: String,
-    @SerialName("last_updated") val lastUpdated: String
+    val summary: String,                    // Telegram only — never render in VitaNest
+    @SerialName("last_updated") val lastUpdated: String,
+    val structured: BriefStructured? = null
 )
 
 // ── Whoop ─────────────────────────────────────────────────────
