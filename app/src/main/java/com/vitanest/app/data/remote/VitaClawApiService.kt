@@ -11,6 +11,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 // ── System ────────────────────────────────────────────────────
 
@@ -376,7 +377,9 @@ interface VitaClawApiService {
     suspend fun getBrief(): Response<BriefResponse>
 
     @GET("whoop")
-    suspend fun getWhoop(): Response<WhoopResponse>
+    suspend fun getWhoop(
+        @Query("date") date: String? = null
+    ): Response<WhoopResponse>
 
     @GET("goals")
     suspend fun getGoals(): Response<GoalsResponse>

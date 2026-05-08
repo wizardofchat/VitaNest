@@ -307,8 +307,8 @@ private fun TurbineCanvas(
             drawCircle(color = T.Paper, radius = innerCircR, center = centre)
         }
 
-        // Blade click targets
-        val bladeNavRoutes = listOf("energy", "portfolio_detail", "sicksense")
+        // ── Blade click targets — Health now routes to "health" ──
+        val bladeNavRoutes = listOf("energy", "portfolio_detail", "health")
         BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
             val radians = Math.toRadians(angleDeg.toDouble())
             val midR    = (INNER_RADIUS_DP + OUTER_RADIUS_DP) / 2f
@@ -323,12 +323,12 @@ private fun TurbineCanvas(
             )
         }
 
-        // Centre ring click
+        // Centre ring click — routes to health
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size((RING_RADIUS_DP * 2).dp)
-                .clickable { navController.navigate("sicksense") }
+                .clickable { navController.navigate("health") }
         )
 
         // Centre text
@@ -557,7 +557,7 @@ fun InkBottomNav(
         Triple("home",             "Home ☘️", "home"),
         Triple("portfolio_detail", "Finance",  "portfolio_detail"),
         Triple("energy",           "Energy",   "energy"),
-        Triple("sicksense",        "Health",   "sicksense"),
+        Triple("health",           "Health",   "health"),
         Triple("ask",              "Ask",      "ask")
     )
 

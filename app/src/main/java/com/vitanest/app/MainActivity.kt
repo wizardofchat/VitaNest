@@ -78,6 +78,12 @@ class MainActivity : ComponentActivity() {
                                 repository    = vitaClawRepository
                             )
                         }
+                        composable("health") {
+                            HealthScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository
+                            )
+                        }
                         composable("council") {
                             ComingSoonScreen(onBack = { navController.popBackStack() })
                         }

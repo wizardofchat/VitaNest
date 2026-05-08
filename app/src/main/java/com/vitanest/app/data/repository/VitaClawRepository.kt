@@ -185,9 +185,9 @@ open class VitaClawRepository {
 
     // ── Whoop ─────────────────────────────────────────────────
 
-    open suspend fun getWhoop(): Result<WhoopResponse> {
+    open suspend fun getWhoop(date: String? = null): Result<WhoopResponse> {
         return try {
-            val r = apiService.getWhoop()
+            val r = apiService.getWhoop(date)
             if (r.isSuccessful) {
                 val body = r.body()
                 if (body != null) Result.success(body)
