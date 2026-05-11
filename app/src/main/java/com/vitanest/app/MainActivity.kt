@@ -1,7 +1,8 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// MainActivity — BuddieViewModel scoped to activity, survives tab switches ☘️
+// MainActivity — BuddieViewModel scoped to activity, survives tab switches
+// Updated: dca_detail/{ticker} route added ☘️
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -66,10 +67,19 @@ class MainActivity : ComponentActivity() {
                                 repository    = vitaClawRepository
                             )
                         }
+                        composable("dca_detail/{ticker}") { backStackEntry ->
+                            val ticker = backStackEntry.arguments
+                                ?.getString("ticker") ?: ""
+                            DcaDetailScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository,
+                                ticker        = ticker
+                            )
+                        }
                         composable("ask") {
                             AskScreen(
-                                navController   = navController,
-                                viewModel       = buddieViewModel
+                                navController = navController,
+                                viewModel     = buddieViewModel
                             )
                         }
                         composable("energy") {

@@ -2,7 +2,8 @@ package com.vitanest.app.data.remote
 
 // © 2026 Sumeet Garg — VitaNest
 // VitaClawApiService — all data models + Retrofit interface
-// Updated: /chat offline flag, job_id, async_mode; new chat/opening, history, intents, pending ☘️
+// Updated: DCA models added (DcaDetailResponse, OrdersSummaryResponse);
+//          Position pnl_pct field added; /portfolio/dca + /portfolio/orders wired ☘️
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -150,6 +151,7 @@ data class PendingOfflineResponse(
     @SerialName("pending_count") val pendingCount: Int,
     val jobs: List<PendingOfflineItem> = emptyList()
 )
+
 // ── Portfolio ─────────────────────────────────────────────────
 
 @Serializable
@@ -165,7 +167,8 @@ data class Position(
     val name: String = "",
     @SerialName("quantity")  val quantity: Double = 0.0,
     @SerialName("value_gbp") val marketValue: Double,
-    @SerialName("pnl_gbp")   val pnlPercent: Double = 0.0
+    @SerialName("pnl_gbp")   val pnlGbp: Double = 0.0,
+    @SerialName("pnl_pct")   val pnlPct: Double = 0.0
 )
 
 @Serializable
@@ -181,15 +184,171 @@ data class PiesResponse(
 data class PieItem(
     val id: Int? = null,
     val name: String,
-    @SerialName("value_gbp")            val valueGbp: Double,
-    @SerialName("pnl_gbp")             val pnlGbp: Double,
-    @SerialName("pnl_pct")             val pnlPct: Double,
-    @SerialName("cash_gbp")            val cashGbp: Double,
-    @SerialName("weight_pct")          val weightPct: Double,
-    @SerialName("holdings_count")      val holdingsCount: Int,
+    @SerialName("value_gbp")             val valueGbp: Double,
+    @SerialName("pnl_gbp")              val pnlGbp: Double,
+    @SerialName("pnl_pct")              val pnlPct: Double,
+    @SerialName("cash_gbp")             val cashGbp: Double,
+    @SerialName("weight_pct")           val weightPct: Double,
+    @SerialName("holdings_count")       val holdingsCount: Int,
     val status: String? = null,
     @SerialName("dividends_gained_gbp") val dividendsGainedGbp: Double = 0.0,
     val tickers: List<String> = emptyList()
+)
+
+// ── DCA ───────────────────────────────────────────────────────
+
+@Serializable
+data class DcaOverview(
+    @SerialName("first_order")           val firstOrder: String = "",
+    @SerialName("first_price_gbp")       val firstPriceGbp: Double = 0.0,
+    @SerialName("last_order")            val lastOrder: String = "",
+    @SerialName("last_price_gbp")        val lastPriceGbp: Double = 0.0,
+    @SerialName("total_orders")          val totalOrders: Int = 0,
+    @SerialName("cash_orders")           val cashOrders: Int = 0,
+    @SerialName("reinvestment_orders")   val reinvestmentOrders: Int = 0,
+    @SerialName("total_invested_gbp")    val totalInvestedGbp: Double = 0.0,
+    @SerialName("total_quantity")        val totalQuantity: Double = 0.0,
+    @SerialName("reinvested_quantity")   val reinvestedQuantity: Double = 0.0
+)
+
+@Serializable
+data class DcaPerformance(
+    @SerialName("blended_avg_gbp")   val blendedAvgGbp: Double = 0.0,
+    @SerialName("current_price_gbp") val currentPriceGbp: Double = 0.0,
+    @SerialName("current_value_gbp") val currentValueGbp: Double = 0.0,
+    @SerialName("capital_gain_gbp")  val capitalGainGbp: Double = 0.0,
+    @SerialName("capital_return_pct") val capitalReturnPct: Double = 0.0
+)
+
+@Serializable
+data class DcaEffectiveness(
+    @SerialName("buys_above_avg") val buysAboveAvg: Int = 0,
+    @SerialName("buys_above_pct") val buysAbovePct: Double = 0.0,
+    @SerialName("buys_below_avg") val buysBelowAvg: Int = 0,
+    @SerialName("buys_below_pct") val buysBelowPct: Double = 0.0,
+    val verdict: String = ""    // "trending_up" | "trending_down" | "mixed"
+)
+
+@Serializable
+data class DcaPriceBucket(
+    @SerialName("range_low")  val rangeLow: Double = 0.0,
+    @SerialName("range_high") val rangeHigh: Double = 0.0,
+    val count: Int = 0
+)
+
+@Serializable
+data class DcaMonthlyEntry(
+    val month: String = "",                         // "YYYY-MM"
+    @SerialName("avg_price_gbp")  val avgPriceGbp: Double = 0.0,
+    val quantity: Double = 0.0,
+    val orders: Int = 0,
+    @SerialName("above_avg_qty")  val aboveAvgQty: Boolean = false,
+    @SerialName("price_vs_prev")  val priceVsPrev: String = "" // "first"|"up"|"down"|"flat"
+)
+
+@Serializable
+data class DcaDividendPayment(
+    val date: String = "",
+    val quantity: Double = 0.0,
+    @SerialName("amount_gbp") val amountGbp: Double = 0.0,
+    @SerialName("per_share")  val perShare: Double = 0.0
+)
+
+@Serializable
+data class DcaDividends(
+    @SerialName("num_payments")        val numPayments: Int = 0,
+    val frequency: String = "",
+    @SerialName("total_received_gbp")  val totalReceivedGbp: Double = 0.0,
+    @SerialName("dividend_return_pct") val dividendReturnPct: Double = 0.0,
+    @SerialName("last_date")           val lastDate: String = "",
+    @SerialName("last_amount_gbp")     val lastAmountGbp: Double = 0.0,
+    @SerialName("last_shares")         val lastShares: Double = 0.0,
+    @SerialName("last_per_share_gbp")  val lastPerShareGbp: Double = 0.0,
+    val payments: List<DcaDividendPayment> = emptyList(),
+    @SerialName("next_payment_date")   val nextPaymentDate: String? = null,
+    @SerialName("est_next_amount_gbp") val estNextAmountGbp: Double? = null,
+    @SerialName("days_until_next")     val daysUntilNext: Int? = null,
+    val confidence: String? = null     // "High" | "Medium ⚠️" | "Low ⚠️"
+)
+
+@Serializable
+data class DcaVerdict(
+    @SerialName("capital_return_pct")  val capitalReturnPct: Double = 0.0,
+    @SerialName("dividend_return_pct") val dividendReturnPct: Double = 0.0,
+    @SerialName("total_return_pct")    val totalReturnPct: Double = 0.0,
+    val rating: String = ""    // "strong" | "positive" | "slight_loss" | "underwater"
+)
+
+@Serializable
+data class DcaDetailResponse(
+    val ticker: String,
+    val name: String = "",
+    val currency: String = "",
+    val isin: String = "",
+    val overview: DcaOverview = DcaOverview(),
+    val performance: DcaPerformance = DcaPerformance(),
+    @SerialName("dca_effectiveness") val dcaEffectiveness: DcaEffectiveness = DcaEffectiveness(),
+    @SerialName("price_distribution") val priceDistribution: List<DcaPriceBucket> = emptyList(),
+    val monthly: List<DcaMonthlyEntry> = emptyList(),
+    val dividends: DcaDividends? = null,    // null for non-dividend tickers (e.g. SGLN)
+    val verdict: DcaVerdict = DcaVerdict()
+)
+
+// ── Orders summary ────────────────────────────────────────────
+
+@Serializable
+data class OrdersDateRange(
+    val from: String = "",
+    val to: String = ""
+)
+
+@Serializable
+data class OrdersSummary(
+    @SerialName("total_orders")       val totalOrders: Int = 0,
+    @SerialName("total_invested_gbp") val totalInvestedGbp: Double = 0.0,
+    @SerialName("tickers_requested")  val tickersRequested: List<String> = emptyList(),
+    @SerialName("tickers_found")      val tickersFound: List<String> = emptyList(),
+    @SerialName("days_window")        val daysWindow: Int = 0,
+    @SerialName("date_range")         val dateRange: OrdersDateRange = OrdersDateRange()
+)
+
+@Serializable
+data class OrdersByTickerMonthly(
+    val month: String = "",
+    val quantity: Double = 0.0,
+    val orders: Int = 0
+)
+
+@Serializable
+data class OrdersByTicker(
+    val ticker: String,
+    val name: String = "",
+    @SerialName("order_count")        val orderCount: Int = 0,
+    @SerialName("total_quantity")     val totalQuantity: Double = 0.0,
+    @SerialName("total_invested_gbp") val totalInvestedGbp: Double = 0.0,
+    @SerialName("avg_price_gbp")      val avgPriceGbp: Double = 0.0,
+    @SerialName("first_order")        val firstOrder: String = "",
+    @SerialName("last_order")         val lastOrder: String = "",
+    @SerialName("autoinvest_pct")     val autoinvestPct: Double = 0.0,
+    val monthly: List<OrdersByTickerMonthly> = emptyList()
+)
+
+@Serializable
+data class RecentOrder(
+    val date: String = "",
+    val ticker: String = "",
+    val name: String = "",
+    val quantity: Double = 0.0,
+    @SerialName("avg_price_gbp") val avgPriceGbp: Double = 0.0,
+    @SerialName("total_gbp")     val totalGbp: Double = 0.0,
+    val source: String = ""
+)
+
+@Serializable
+data class OrdersSummaryResponse(
+    val summary: OrdersSummary = OrdersSummary(),
+    @SerialName("by_ticker")     val byTicker: List<OrdersByTicker> = emptyList(),
+    @SerialName("recent_orders") val recentOrders: List<RecentOrder> = emptyList()
 )
 
 // ── Brief ─────────────────────────────────────────────────────
@@ -372,6 +531,18 @@ interface VitaClawApiService {
 
     @GET("portfolio/dividend-data")
     suspend fun getDividendData(): Response<DividendDataResponse>
+
+    @GET("portfolio/dca/{ticker}")
+    suspend fun getDcaDetail(
+        @Path("ticker") ticker: String
+    ): Response<DcaDetailResponse>
+
+    @GET("portfolio/orders")
+    suspend fun getPortfolioOrders(
+        @Query("tickers") tickers: String = "ALL",
+        @Query("days")    days: Int = 90,
+        @Query("limit")   limit: Int = 50
+    ): Response<OrdersSummaryResponse>
 
     @GET("brief")
     suspend fun getBrief(): Response<BriefResponse>

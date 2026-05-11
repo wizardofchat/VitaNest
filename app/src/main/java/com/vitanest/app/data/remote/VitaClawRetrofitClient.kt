@@ -1,5 +1,11 @@
 package com.vitanest.app.data.remote
 
+// © 2026 Sumeet Garg — VitaNest
+// RetrofitClient — single OkHttp client, caching bug fixed 2026-05-11 ☘️
+// Removed: ConnectionPool(0, 1, NANOSECONDS) — was forcing fresh TCP connection
+// on every request, causing stale portfolio values from proxy layer.
+// OkHttp defaults: 5 idle connections, 5 min keepalive — correct for VitaNest.
+
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -24,9 +30,10 @@ object RetrofitClient {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .connectionPool(
-            okhttp3.ConnectionPool(0, 1, TimeUnit.NANOSECONDS)
-        )
+        // ConnectionPool deliberately omitted — OkHttp defaults are correct:
+        // 5 idle connections, 5 minute keepalive. DO NOT re-add the
+        // ConnectionPool(0, 1, NANOSECONDS) override — it caused portfolio
+        // value mismatches (£13,956 vs £14,275) by forcing stale connections.
         .build()
 
     val apiService: VitaClawApiService by lazy {

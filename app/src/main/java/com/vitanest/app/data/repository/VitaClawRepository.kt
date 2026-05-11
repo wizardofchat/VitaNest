@@ -2,7 +2,7 @@ package com.vitanest.app.data.repository
 
 // © 2026 Sumeet Garg — VitaNest
 // VitaClawRepository — all API calls, single source of truth
-// Updated: sendChat offline flag + 429 handling; new chat/opening, history, intents, pending ☘️
+// Updated: getDcaDetail + getPortfolioOrders added ☘️
 
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
@@ -11,11 +11,13 @@ import com.vitanest.app.data.remote.ChatHistoryResponse
 import com.vitanest.app.data.remote.ChatOpeningResponse
 import com.vitanest.app.data.remote.ChatRequest
 import com.vitanest.app.data.remote.ChatResponse
+import com.vitanest.app.data.remote.DcaDetailResponse
 import com.vitanest.app.data.remote.DividendDataResponse
 import com.vitanest.app.data.remote.EnergyResponse
 import com.vitanest.app.data.remote.GoalsResponse
 import com.vitanest.app.data.remote.HealthResponse
 import com.vitanest.app.data.remote.IntentsResponse
+import com.vitanest.app.data.remote.OrdersSummaryResponse
 import com.vitanest.app.data.remote.PendingOfflineResponse
 import com.vitanest.app.data.remote.PiesResponse
 import com.vitanest.app.data.remote.PortfolioResponse
@@ -166,6 +168,34 @@ open class VitaClawRepository {
                 val body = r.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /portfolio/dividend-data"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getDcaDetail(ticker: String): Result<DcaDetailResponse> {
+        return try {
+            val r = apiService.getDcaDetail(ticker)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /portfolio/dca/$ticker"))
+            } else if (r.code() == 422) {
+                Result.failure(Exception("'$ticker' not found"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getPortfolioOrders(
+        tickers: String = "ALL",
+        days: Int = 90,
+        limit: Int = 50
+    ): Result<OrdersSummaryResponse> {
+        return try {
+            val r = apiService.getPortfolioOrders(tickers, days, limit)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /portfolio/orders"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
