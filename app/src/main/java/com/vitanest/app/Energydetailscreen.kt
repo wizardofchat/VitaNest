@@ -5,6 +5,7 @@ package com.vitanest.app
 // Five sections mapped from real /energy response 2026-04-24 ☘️
 // charge_mode pill: FAST/ECO+ → black · ECO → outline · STOPPED → grey
 // plug_state: parked — add when VitaClaw captures PLUG_STATES
+// Updated: InkBottomNav added 2026-05-12
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -124,11 +125,6 @@ fun EnergyDetailScreen(
 
             // ─────────────────────────────────────────────────────
             // 1. SOLAR
-            //    solar_generated_kwh  21.95  total production
-            //    self_consumed_kwh    17.78  used directly in home
-            //    solar_exported_kwh    4.17  sent to grid
-            //    solar_savings_gbp     6.25  what solar saved
-            //    export_earnings_gbp   0.43  earned from export
             // ─────────────────────────────────────────────────────
             item {
                 EnergySectionHead(
@@ -147,11 +143,6 @@ fun EnergyDetailScreen(
 
             // ─────────────────────────────────────────────────────
             // 2. EV
-            //    ev_total_kwh          43.09  total charged
-            //    ev_solar_kwh           5.85  from solar
-            //    ev_grid_kwh           37.24  from grid
-            //    ev_charging_cost_gbp   6.26  total cost
-            //    charge_mode           Eco+   current mode
             // ─────────────────────────────────────────────────────
             item {
                 EnergySectionHead(
@@ -167,9 +158,6 @@ fun EnergyDetailScreen(
 
             // ─────────────────────────────────────────────────────
             // 3. EDDI — WATER HEATING
-            //    eddi_solar_kwh    6.12  hot water from solar
-            //    eddi_boosted_kwh  0.00  boosted from grid
-            //                           always shown — 0.0 is informative
             // ─────────────────────────────────────────────────────
             item {
                 EnergySectionHead(
@@ -186,9 +174,7 @@ fun EnergyDetailScreen(
             }
 
             // ─────────────────────────────────────────────────────
-            // 4. GRID — IMPORT vs EXPORT
-            //    grid_imported_kwh   40.55  bought → home_import_cost_gbp £1.16
-            //    solar_exported_kwh   4.17  sold   → export_earnings_gbp  £0.43
+            // 4. GRID
             // ─────────────────────────────────────────────────────
             item {
                 EnergySectionHead(title = "GRID")
@@ -207,10 +193,6 @@ fun EnergyDetailScreen(
 
             // ─────────────────────────────────────────────────────
             // 5. SAVINGS
-            //    solar_savings_gbp        6.25  what solar saved
-            //    export_earnings_gbp      0.43  earned from export
-            //    energy_cost_savings_gbp  6.68  net savings overall
-            //    total_cost_gbp           6.99  what you actually paid
             // ─────────────────────────────────────────────────────
             item {
                 EnergySectionHead(title = "SAVINGS")
@@ -221,16 +203,13 @@ fun EnergyDetailScreen(
                     color     = T.Ink,
                     modifier  = Modifier.padding(vertical = 4.dp)
                 )
-                EnergyGbpRow("Net saved",  d.energyCostSavingsGbp, FontWeight.Bold)
-                EnergyGbpRow("Total spent",d.totalCostGbp,          FontWeight.Bold)
+                EnergyGbpRow("Net saved",   d.energyCostSavingsGbp, FontWeight.Bold)
+                EnergyGbpRow("Total spent", d.totalCostGbp,          FontWeight.Bold)
                 Spacer(modifier = Modifier.height(T.sectionGap))
             }
 
             // ─────────────────────────────────────────────────────
-            // TARIFFS — 10sp, informational only
-            //    tariff_peak_pence    35.17
-            //    tariff_cheap_pence   16.81
-            //    tariff_export_pence  10.32
+            // TARIFFS
             // ─────────────────────────────────────────────────────
             item {
                 val hasTariffs = d.tariffPeakPence != null ||
@@ -260,6 +239,15 @@ fun EnergyDetailScreen(
                 )
             }
         }
+
+        // ── Bottom nav ────────────────────────────────────────────
+        InkBottomNav(
+            current       = "energy",
+            navController = navController,
+            modifier      = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+        )
     }
 }
 
@@ -296,7 +284,7 @@ private fun EnergySectionHead(
     Spacer(modifier = Modifier.height(8.dp))
 }
 
-// ── kWh row — label left · annotation + value right ──────────
+// ── kWh row ───────────────────────────────────────────────────
 @Composable
 private fun EnergyKwhRow(
     label: String,
@@ -329,7 +317,7 @@ private fun EnergyKwhRow(
     HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }
 
-// ── £ row — for Savings section ──────────────────────────────
+// ── £ row ─────────────────────────────────────────────────────
 @Composable
 private fun EnergyGbpRow(
     label: String,
@@ -355,7 +343,7 @@ private fun EnergyGbpRow(
     HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }
 
-// ── Tariff row — 10sp muted ───────────────────────────────────
+// ── Tariff row ────────────────────────────────────────────────
 @Composable
 private fun TariffRow(label: String, pence: Double?) {
     if (pence == null) return
@@ -375,16 +363,16 @@ private fun TariffRow(label: String, pence: Double?) {
     }
 }
 
-// ── Charge mode pill — no emojis, ink badges only ────────────
+// ── Charge mode pill ──────────────────────────────────────────
 @Composable
 private fun ChargeModePill(mode: String) {
     val pillShape = RoundedCornerShape(4.dp)
     val (bg, fg) = when (mode) {
-        "Fast"    -> T.Ink        to T.Paper
-        "Eco+"    -> T.Ink        to T.Paper
-        "Eco"     -> Color.White  to T.Ink
-        "Stopped" -> T.Rule       to T.Muted
-        else      -> T.Rule       to T.Muted
+        "Fast"    -> T.Ink       to T.Paper
+        "Eco+"    -> T.Ink       to T.Paper
+        "Eco"     -> Color.White to T.Ink
+        "Stopped" -> T.Rule      to T.Muted
+        else      -> T.Rule      to T.Muted
     }
     Box(
         modifier = Modifier
@@ -402,7 +390,7 @@ private fun ChargeModePill(mode: String) {
     }
 }
 
-// ── Stale data warning ────────────────────────────────────────
+// ── Stale warning ─────────────────────────────────────────────
 @Composable
 private fun StaleWarning(lastUpdated: String) {
     Row(

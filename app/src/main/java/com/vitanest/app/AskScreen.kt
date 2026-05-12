@@ -1,8 +1,8 @@
 ﻿package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// AskScreen — Buddie chat, offline inbox, file upload, clear chat ☘️
-// Layout: Header → Quota → Offline Inbox → Input → Tiles → Chat
+// AskScreen — Buddie chat, offline inbox, observations, file upload, clear chat ☘️
+// Layout: Header → Quota → Offline Inbox → Observations → Input → Tiles → Chat
 
 import android.content.Context
 import android.content.Intent
@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -35,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.vitanest.app.data.remote.BriefStructured
+import com.vitanest.app.data.remote.ObservationItem
 import com.vitanest.app.data.remote.PendingOfflineItem
 import com.vitanest.app.ui.theme.VitaNestTheme as T
 import kotlinx.coroutines.launch
@@ -43,9 +46,15 @@ import java.io.InputStreamReader
 
 private enum class ChatMode { AUTO, OFFLINE }
 
-private val BuddyGreen = Color(0xFF2D6A4F)
-private val AmberDash  = Color(0xFFF59E0B)
-private val ErrorRed   = Color(0xFFC0392B)
+private val BuddyGreen  = Color(0xFF2D6A4F)
+private val AmberDash   = Color(0xFFF59E0B)
+private val ErrorRed    = Color(0xFFC0392B)
+private val ConfGreen   = Color(0xFF3B6D11)
+private val ConfAmber   = Color(0xFFBA7517)
+private val ConfRed     = Color(0xFFA32D2D)
+private val ConfGreenBg = Color(0xFFEAF3DE)
+private val ConfAmberBg = Color(0xFFFAEEDA)
+private val ConfRedBg   = Color(0xFFFCEBEB)
 
 @Composable
 fun AskScreen(
@@ -63,6 +72,7 @@ fun AskScreen(
     var tilesExpanded by remember { mutableStateOf(false) }
     var quotaExpanded by remember { mutableStateOf(false) }
     var inboxExpanded by remember { mutableStateOf(false) }
+    var obsExpanded   by remember { mutableStateOf(false) }
     var isSending     by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.initialise() }
@@ -164,6 +174,16 @@ fun AskScreen(
                         viewModel.ackOfflineJob(job.jobId)
                     },
                     onDismiss  = { job -> viewModel.ackOfflineJob(job.jobId) }
+                )
+            }
+
+            // ── Observations ──────────────────────────────────
+            if (state.observations.isNotEmpty()) {
+                ObservationsInbox(
+                    observations = state.observations,
+                    expanded     = obsExpanded,
+                    onToggle     = { obsExpanded = !obsExpanded },
+                    onFeedback   = { id, rating -> viewModel.submitFeedback(id, rating) }
                 )
             }
 
@@ -387,6 +407,195 @@ fun AskScreen(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
         )
+    }
+}
+
+// ── Observations Inbox ────────────────────────────────────────
+@Composable
+private fun ObservationsInbox(
+    observations: List<ObservationItem>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onFeedback: (Int, String) -> Unit
+) {
+    val unratedCount = observations.count { it.rating == null }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF5F3EE))
+            .clickable(onClick = onToggle)
+            .animateContentSize()
+    ) {
+        // ── Header row ────────────────────────────────────────
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = T.screenPadding, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(text = "Today's observations", style = T.sectionHead, color = T.Ink)
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (unratedCount > 0) T.Ink else Color(0xFF3B6D11),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text       = if (unratedCount > 0) "$unratedCount" else "✓",
+                        fontSize   = 10.sp,
+                        color      = T.Paper,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                // Red dot only if unrated remain
+                if (unratedCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(ErrorRed, RoundedCornerShape(3.dp))
+                    )
+                }
+            }
+            Text(text = if (expanded) "▲" else "▼", style = T.meta, color = T.Muted)
+        }
+
+        // ── Expanded cards ────────────────────────────────────
+        if (expanded) {
+            val unrated = observations.filter { it.rating == null }
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            if (unrated.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = T.screenPadding, vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "All observations reviewed ✓", style = T.meta, color = T.Muted)
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = T.screenPadding, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    unrated.forEach { obs ->
+                        ObservationCard(obs = obs, onFeedback = onFeedback)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Observation card ──────────────────────────────────────────
+@Composable
+private fun ObservationCard(
+    obs: ObservationItem,
+    onFeedback: (Int, String) -> Unit
+) {
+    val domainIcon = when (obs.domain) {
+        "hrv"                              -> "❤️"
+        "spo2"                             -> "🫁"
+        "strain"                           -> "💪"
+        "recovery"                         -> "🔋"
+        "finance", "income", "portfolio",
+        "capital", "income_performance",
+        "portfolio_health",
+        "portfolio_performance"            -> "📈"
+        "energy", "solar", "ev",
+        "eddi", "grid", "summary"          -> "⚡"
+        else                               -> "●"
+    }
+
+    val (confBg, confFg) = when {
+        obs.confidence >= 0.8 -> ConfGreenBg to ConfGreen
+        obs.confidence >= 0.6 -> ConfAmberBg to ConfAmber
+        else                  -> ConfRedBg   to ConfRed
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.5.dp, T.Rule, RoundedCornerShape(8.dp))
+            .background(Color.White, RoundedCornerShape(8.dp))
+            .clickable { /* consume click — prevent collapse toggle */ }
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Domain + confidence badge
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text     = "$domainIcon ${obs.domain}",
+                fontSize = 12.sp,
+                color    = T.Muted
+            )
+            Box(
+                modifier = Modifier
+                    .background(confBg, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text       = "${"%.0f".format(obs.confidence * 100)}%",
+                    fontSize   = 11.sp,
+                    color      = confFg,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        // Content — serif, never action field
+        Text(
+            text       = obs.content,
+            fontFamily = T.Serif,
+            fontSize   = 13.sp,
+            color      = T.Ink,
+            lineHeight = 19.sp
+        )
+
+        // Feedback buttons
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                "useful"    to "👍 Useful",
+                "wrong"     to "👎 Wrong",
+                "important" to "⭐ Important"
+            ).forEach { (value, label) ->
+                val isSelected = obs.rating == value
+                OutlinedButton(
+                    onClick        = { onFeedback(obs.id, value) },
+                    border         = ButtonDefaults.outlinedButtonBorder.copy(
+                        width = if (isSelected) 1.dp else 0.5.dp
+                    ),
+                    colors         = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (isSelected) T.Ink else Color.Transparent,
+                        contentColor   = if (isSelected) T.Paper else T.Muted
+                    ),
+                    shape          = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier       = Modifier
+                        .weight(1f)
+                        .height(30.dp)
+                ) {
+                    Text(text = label, fontSize = 10.sp)
+                }
+            }
+        }
     }
 }
 

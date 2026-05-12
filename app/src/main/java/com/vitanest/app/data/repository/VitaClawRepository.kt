@@ -2,7 +2,8 @@ package com.vitanest.app.data.repository
 
 // © 2026 Sumeet Garg — VitaNest
 // VitaClawRepository — all API calls, single source of truth
-// Updated: getDcaDetail + getPortfolioOrders added ☘️
+// Updated: getDcaDetail + getPortfolioOrders added;
+//          getTodayObservations + postObservationFeedback added ☘️
 
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
@@ -14,9 +15,11 @@ import com.vitanest.app.data.remote.ChatResponse
 import com.vitanest.app.data.remote.DcaDetailResponse
 import com.vitanest.app.data.remote.DividendDataResponse
 import com.vitanest.app.data.remote.EnergyResponse
+import com.vitanest.app.data.remote.FeedbackRequest
 import com.vitanest.app.data.remote.GoalsResponse
 import com.vitanest.app.data.remote.HealthResponse
 import com.vitanest.app.data.remote.IntentsResponse
+import com.vitanest.app.data.remote.ObservationsResponse
 import com.vitanest.app.data.remote.OrdersSummaryResponse
 import com.vitanest.app.data.remote.PendingOfflineResponse
 import com.vitanest.app.data.remote.PiesResponse
@@ -249,6 +252,29 @@ open class VitaClawRepository {
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /energy"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Buddie Observations ───────────────────────────────────
+
+    open suspend fun getTodayObservations(): Result<ObservationsResponse> {
+        return try {
+            val r = apiService.getTodayObservations()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /buddie/observations/today"))
+            } else if (r.code() == 404) {
+                Result.success(ObservationsResponse(date = "", count = 0, observations = emptyList()))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun postObservationFeedback(id: Int, rating: String): Result<Unit> {
+        return try {
+            val r = apiService.postObservationFeedback(id, FeedbackRequest(rating = rating))
+            if (r.isSuccessful) Result.success(Unit)
+            else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
 }

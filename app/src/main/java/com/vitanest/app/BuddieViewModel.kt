@@ -1,10 +1,14 @@
 ﻿package com.vitanest.app
 
+// © 2026 Sumeet Garg — VitaNest
+// BuddieViewModel — Buddie chat state, offline inbox, observations ☘️
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vitanest.app.data.remote.BriefResponse
 import com.vitanest.app.data.remote.ChatOpeningResponse
 import com.vitanest.app.data.remote.IntentItem
+import com.vitanest.app.data.remote.ObservationItem
 import com.vitanest.app.data.remote.PendingOfflineItem
 import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.repository.VitaClawRepository
@@ -44,7 +48,8 @@ data class BuddieUiState(
     val briefData: BriefResponse?             = null,
     val intents: List<IntentItem>             = emptyList(),
     val bubbles: List<BubbleMsg>              = emptyList(),
-    val offlineJobs: List<PendingOfflineItem> = emptyList()
+    val offlineJobs: List<PendingOfflineItem> = emptyList(),
+    val observations: List<ObservationItem>   = emptyList()
 )
 
 class BuddieViewModel(
@@ -82,6 +87,9 @@ class BuddieViewModel(
             }
             repository.getIntents().onSuccess { r ->
                 _state.value = _state.value.copy(intents = r.intents.filter { it.enabled })
+            }
+            repository.getTodayObservations().onSuccess { o ->
+                _state.value = _state.value.copy(observations = o.observations)
             }
             _state.value = _state.value.copy(isLoading = false)
         }
@@ -132,7 +140,21 @@ class BuddieViewModel(
             }
         }
     }
+
     fun clearChat() {
         _state.value = _state.value.copy(bubbles = emptyList())
+    }
+
+    fun submitFeedback(id: Int, rating: String) {
+        // Optimistic local update — reflect immediately, POST in background
+        _state.value = _state.value.copy(
+            observations = _state.value.observations.map { obs ->
+                if (obs.id == id) obs.copy(rating = rating) else obs
+            }
+        )
+        viewModelScope.launch {
+            repository.postObservationFeedback(id, rating)
+            // Silent fail — observation may be gone by the time feedback arrives
+        }
     }
 }
