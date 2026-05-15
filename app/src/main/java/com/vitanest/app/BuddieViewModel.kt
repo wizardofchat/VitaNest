@@ -2,6 +2,9 @@
 
 // © 2026 Sumeet Garg — VitaNest
 // BuddieViewModel — Buddie chat state, offline inbox, observations ☘️
+// Updated: init fetch now parallel (async/await), not sequential.
+//          getBrief() removed — brief comes from HomeViewModel cache.
+//          initialise() guard prevents re-fetch on tab switch. ☘️
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -12,6 +15,8 @@ import com.vitanest.app.data.remote.ObservationItem
 import com.vitanest.app.data.remote.PendingOfflineItem
 import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.repository.VitaClawRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,65 +66,99 @@ class BuddieViewModel(
 
     private var initialised = false
 
-    fun initialise() {
+    fun initialise(cachedBrief: BriefResponse? = null) {
+        // Apply cached brief immediately — no network wait
+        if (cachedBrief != null && _state.value.briefData == null) {
+            _state.value = _state.value.copy(briefData = cachedBrief)
+        }
         if (initialised) return
         initialised = true
+
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true)
-            repository.getQuota().onSuccess { q ->
-                _state.value = _state.value.copy(quotaData = q, quotaExceeded = q.status == "quota_exceeded")
-            }
-            repository.getChatOpening().onSuccess { o ->
-                _state.value = _state.value.copy(opening = o)
-            }
-            repository.getBrief().onSuccess { b ->
-                _state.value = _state.value.copy(briefData = b)
-            }
-            repository.getChatHistory().onSuccess { h ->
-                val bubbles = h.exchanges.reversed().map { e ->
-                    BubbleMsg(role = e.role, text = e.message, provenance = e.provenance,
-                        elapsedMs = e.elapsedMs, timeDisplay = parseTsToDisplay(e.ts))
+
+            // All calls in parallel — Ask screen opens as fast as the slowest single call,
+            // not the sum of all calls
+            coroutineScope {
+                val quotaDeferred       = async { repository.getQuota() }
+                val openingDeferred     = async { repository.getChatOpening() }
+                val historyDeferred     = async { repository.getChatHistory() }
+                val offlineDeferred     = async { repository.getChatOfflinePending() }
+                val intentsDeferred     = async { repository.getIntents() }
+                val observationsDeferred= async { repository.getTodayObservations() }
+
+                quotaDeferred.await().onSuccess { q ->
+                    _state.value = _state.value.copy(
+                        quotaData     = q,
+                        quotaExceeded = q.status == "quota_exceeded"
+                    )
                 }
-                _state.value = _state.value.copy(bubbles = bubbles)
+                openingDeferred.await().onSuccess { o ->
+                    _state.value = _state.value.copy(opening = o)
+                }
+                historyDeferred.await().onSuccess { h ->
+                    val bubbles = h.exchanges.reversed().map { e ->
+                        BubbleMsg(
+                            role        = e.role,
+                            text        = e.message,
+                            provenance  = e.provenance,
+                            elapsedMs   = e.elapsedMs,
+                            timeDisplay = parseTsToDisplay(e.ts)
+                        )
+                    }
+                    _state.value = _state.value.copy(bubbles = bubbles)
+                }
+                offlineDeferred.await().onSuccess { p ->
+                    _state.value = _state.value.copy(offlineJobs = p.jobs)
+                }
+                intentsDeferred.await().onSuccess { r ->
+                    _state.value = _state.value.copy(intents = r.intents.filter { it.enabled })
+                }
+                observationsDeferred.await().onSuccess { o ->
+                    _state.value = _state.value.copy(observations = o.observations)
+                }
             }
-            repository.getChatOfflinePending().onSuccess { p ->
-                _state.value = _state.value.copy(offlineJobs = p.jobs)
-            }
-            repository.getIntents().onSuccess { r ->
-                _state.value = _state.value.copy(intents = r.intents.filter { it.enabled })
-            }
-            repository.getTodayObservations().onSuccess { o ->
-                _state.value = _state.value.copy(observations = o.observations)
-            }
+
             _state.value = _state.value.copy(isLoading = false)
         }
     }
 
     fun sendMessage(message: String, offline: Boolean = false) {
         if (message.isBlank()) return
-        val trimmed = message.trim()
+        val trimmed    = message.trim()
         val userBubble = BubbleMsg(role = "user", text = trimmed)
         val placeholder = if (offline)
-            BubbleMsg(role = "buddy", text = "Queued offline - Buddy will notify you via Telegram", isQueued = true)
+            BubbleMsg(role = "buddy", text = "Queued offline — Buddy will notify you via Telegram", isQueued = true)
         else
             BubbleMsg(role = "buddy", text = "...", isLoading = true)
         _state.value = _state.value.copy(bubbles = _state.value.bubbles + userBubble + placeholder)
+
         viewModelScope.launch {
             repository.sendChat(trimmed, offline).fold(
                 onSuccess = { resp ->
                     val updated = _state.value.bubbles.dropLast(1) + BubbleMsg(
-                        role = "buddy", text = resp.response, provenance = resp.provenance,
-                        elapsedMs = resp.elapsedMs, isQueued = resp.asyncMode)
+                        role       = "buddy",
+                        text       = resp.response,
+                        provenance = resp.provenance,
+                        elapsedMs  = resp.elapsedMs,
+                        isQueued   = resp.asyncMode
+                    )
                     _state.value = _state.value.copy(bubbles = updated)
+                    // Refresh quota after send
                     repository.getQuota().onSuccess { q ->
-                        _state.value = _state.value.copy(quotaData = q, quotaExceeded = q.status == "quota_exceeded")
+                        _state.value = _state.value.copy(
+                            quotaData     = q,
+                            quotaExceeded = q.status == "quota_exceeded"
+                        )
                     }
                 },
                 onFailure = { err ->
                     val errText = if (err.message?.contains("50/day") == true)
                         "Daily limit reached (50/day). Resets at midnight."
-                    else "Could not reach VitaClaw - check Tailscale"
-                    val updated = _state.value.bubbles.dropLast(1) + BubbleMsg(role = "buddy", text = errText)
+                    else
+                        "Could not reach VitaClaw — check Tailscale"
+                    val updated = _state.value.bubbles.dropLast(1) +
+                            BubbleMsg(role = "buddy", text = errText)
                     _state.value = _state.value.copy(bubbles = updated)
                 }
             )
@@ -129,14 +168,19 @@ class BuddieViewModel(
     fun ackOfflineJob(jobId: String) {
         viewModelScope.launch {
             repository.ackOfflineMessage(jobId)
-            _state.value = _state.value.copy(offlineJobs = _state.value.offlineJobs.filter { it.jobId != jobId })
+            _state.value = _state.value.copy(
+                offlineJobs = _state.value.offlineJobs.filter { it.jobId != jobId }
+            )
         }
     }
 
     fun refreshQuota() {
         viewModelScope.launch {
             repository.getQuota().onSuccess { q ->
-                _state.value = _state.value.copy(quotaData = q, quotaExceeded = q.status == "quota_exceeded")
+                _state.value = _state.value.copy(
+                    quotaData     = q,
+                    quotaExceeded = q.status == "quota_exceeded"
+                )
             }
         }
     }
@@ -154,7 +198,6 @@ class BuddieViewModel(
         )
         viewModelScope.launch {
             repository.postObservationFeedback(id, rating)
-            // Silent fail — observation may be gone by the time feedback arrives
         }
     }
 }

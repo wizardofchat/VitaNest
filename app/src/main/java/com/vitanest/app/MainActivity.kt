@@ -1,9 +1,9 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// MainActivity — BuddieViewModel scoped to activity, survives tab switches
-// Updated: health route now renders GrowthScreen (Health accessible via turbine petal);
-//          dca_detail/{ticker} route retained ☘️
+// MainActivity — BuddieViewModel + HomeViewModel scoped to activity.
+// HomeViewModel loads once on app open. BuddieViewModel receives cached
+// brief from HomeViewModel so Ask screen never fetches brief separately. ☘️
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -16,6 +16,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
@@ -29,7 +31,16 @@ class MainActivity : ComponentActivity() {
 
     private val vitaClawRepository = VitaClawRepository()
 
-    // ViewModel scoped to activity — survives tab switches
+    // Home — loads once, survives tab switches, owns cache layer
+    private val homeViewModel: HomeViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                HomeViewModel(application, vitaClawRepository) as T
+        }
+    }
+
+    // Buddie — scoped to activity, survives tab switches
     private val buddieViewModel: BuddieViewModel by viewModels {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -49,12 +60,19 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val navController = rememberNavController()
 
+                    // Observe brief from HomeViewModel — passed to Buddie so
+                    // Ask screen shows brief instantly from cache, no extra fetch
+                    val cachedBrief by homeViewModel.briefData.collectAsState()
+
                     NavHost(
                         navController    = navController,
                         startDestination = "home"
                     ) {
                         composable("home") {
-                            HomeScreen(navController, vitaClawRepository)
+                            HomeScreen(
+                                navController = navController,
+                                viewModel     = homeViewModel
+                            )
                         }
                         composable("sicksense") {
                             PulseDetailScreen(
@@ -78,6 +96,9 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("ask") {
+                            // Pass cached brief — Buddie shows it instantly
+                            // initialise() is guarded — only runs once ever
+                            buddieViewModel.initialise(cachedBrief = cachedBrief)
                             AskScreen(
                                 navController = navController,
                                 viewModel     = buddieViewModel
@@ -89,18 +110,12 @@ class MainActivity : ComponentActivity() {
                                 repository    = vitaClawRepository
                             )
                         }
-                        // "health" route now renders GrowthScreen.
-                        // HealthScreen is still reachable via the turbine Health petal
-                        // and centre ring on HomeScreen — both navigate to "health".
-                        // The bottom nav tab label is updated in InkBottomNav (HomeScreen.kt).
                         composable("health") {
                             GrowthScreen(
                                 navController = navController,
                                 repository    = vitaClawRepository
                             )
                         }
-                        // Dedicated health route — used when navigating directly to HealthScreen
-                        // e.g. from a future deep link or system status tile.
                         composable("health_detail") {
                             HealthScreen(
                                 navController = navController,

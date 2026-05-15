@@ -2,9 +2,9 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // HomeScreen — turbine/shamrock canvas redesign ☘️
-// Three blades: Energy (top) · Finance (left) · Health (bottom-right)
-// Centre ring: Whoop recovery arc, colour-coded green/amber/red
-// Insight line: daily quote from /brief structured.quote ☘️
+// Updated: state moved to HomeViewModel (activity-scoped).
+//          No LaunchedEffect — data loads once on app open,
+//          survives all tab switches. Refresh icon triggers vm.refresh(). ☘️
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
@@ -12,6 +12,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -22,17 +23,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.navigation.NavController
+import com.vitanest.app.data.cache.CacheFreshness
 import com.vitanest.app.data.remote.*
-import com.vitanest.app.data.repository.VitaClawRepository
 import com.vitanest.app.ui.theme.VitaNestTheme as T
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlin.math.*
 
 // ── Blade geometry constants ──────────────────────────────────
@@ -44,9 +44,23 @@ private const val RING_RADIUS_DP  = 50f
 private const val RING_STROKE_DP  = 10f
 private const val RING_INNER_DP   = 28f
 private val BLADE_FILL            = Color(0xFF2D6A4F)
-private val BLADE_STROKE          = Color(0xFF1B4332)
+private val BLADE_STROKE_COLOR    = Color(0xFF1B4332)
 private val BLADE_LABEL_COLOR     = Color(0xFFF2EFE8)
 private val BLADE_METRIC_COLOR    = Color(0xFFA8D5BC)
+
+// ── Freshness colours ─────────────────────────────────────────
+private val FreshGreenBg  = Color(0xFFEAF3DE)
+private val FreshGreenFg  = Color(0xFF3B6D11)
+private val FreshGreenBdr = Color(0xFF3B6D11)
+private val FreshAmberBg  = Color(0xFFFAEEDA)
+private val FreshAmberFg  = Color(0xFF854F0B)
+private val FreshAmberBdr = Color(0xFF854F0B)
+private val FreshRedBg    = Color(0xFFFCEBEB)
+private val FreshRedFg    = Color(0xFFA32D2D)
+private val FreshRedBdr   = Color(0xFFA32D2D)
+private val FreshGreyBg   = Color(0xFFF2EFE8)
+private val FreshGreyFg   = Color(0xFF888888)
+private val FreshGreyBdr  = Color(0xFFC8C4BB)
 
 private val BLADE_ANGLES = listOf(
     Triple("Energy",  -90f, 0),
@@ -57,43 +71,22 @@ private val BLADE_ANGLES = listOf(
 @Composable
 fun HomeScreen(
     navController: NavController,
-    repository: VitaClawRepository
+    viewModel: HomeViewModel           // ← activity-scoped, never recreated
 ) {
-    var briefData     by remember { mutableStateOf<BriefResponse?>(null) }
-    var portfolioData by remember { mutableStateOf<PortfolioResponse?>(null) }
-    var energyData    by remember { mutableStateOf<EnergyResponse?>(null) }
-    var whoopData     by remember { mutableStateOf<WhoopResponse?>(null) }
-    var agenticScore  by remember { mutableIntStateOf(0) }
-    var isOnline      by remember { mutableStateOf(false) }
+    // ── Observe ViewModel state — no local state, no LaunchedEffect ──
+    val briefData     by viewModel.briefData.collectAsState()
+    val portfolioData by viewModel.portfolioData.collectAsState()
+    val energyData    by viewModel.energyData.collectAsState()
+    val whoopData     by viewModel.whoopData.collectAsState()
+    val agenticScore  by viewModel.agenticScore.collectAsState()
+    val freshness     by viewModel.freshness.collectAsState()
+    val ageLabel      by viewModel.ageLabel.collectAsState()
+    val isRefreshing  by viewModel.isRefreshing.collectAsState()
+    val isOffline     by viewModel.isOffline.collectAsState()
 
-    LaunchedEffect(Unit) {
-        coroutineScope {
-            val healthDeferred    = async { repository.getHealth() }
-            val briefDeferred     = async { repository.getBrief() }
-            val portfolioDeferred = async { repository.getPortfolio() }
-            val energyDeferred    = async { repository.getEnergy() }
-            val whoopDeferred     = async { repository.getWhoop() }
+    var showClearDialog by remember { mutableStateOf(false) }
 
-            healthDeferred.await().let { r ->
-                isOnline     = r.isSuccess
-                agenticScore = r.getOrNull()?.agenticScore ?: 0
-            }
-            briefDeferred.await().let { r ->
-                if (r.isSuccess) briefData = r.getOrNull()
-            }
-            portfolioDeferred.await().let { r ->
-                if (r.isSuccess) portfolioData = r.getOrNull()
-            }
-            energyDeferred.await().let { r ->
-                if (r.isSuccess) energyData = r.getOrNull()
-            }
-            whoopDeferred.await().let { r ->
-                if (r.isSuccess) whoopData = r.getOrNull()
-            }
-        }
-    }
-
-    // ── Blade fade-in (120ms stagger) ────────────────────────
+    // ── Animations ────────────────────────────────────────────
     val blade0Alpha by produceState(0f) {
         kotlinx.coroutines.delay(0)
         animate(0f, 1f, animationSpec = tween(300)) { v, _ -> value = v }
@@ -115,6 +108,47 @@ fun HomeScreen(
         label         = "recovery_arc"
     )
 
+    val infiniteTransition = rememberInfiniteTransition(label = "spin")
+    val spinAngle by infiniteTransition.animateFloat(
+        initialValue  = 0f,
+        targetValue   = 360f,
+        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
+        label         = "refresh_spin"
+    )
+
+    // ── Clear cache dialog ────────────────────────────────────
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = {
+                Text("Clear cached data?", fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium, color = T.Ink)
+            },
+            text = {
+                Text(
+                    "All locally stored data will be removed. The app will fetch live " +
+                            "from VitaClaw on next open. If VitaClaw is unreachable, screens will show empty.",
+                    fontSize = 13.sp, color = T.Muted, lineHeight = 19.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearDialog = false
+                    viewModel.clearCache()
+                }) {
+                    Text("Clear cache", color = Color(0xFFA32D2D), fontWeight = FontWeight.Medium)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) {
+                    Text("Cancel", color = T.Muted)
+                }
+            },
+            containerColor = Color.White,
+            shape          = RoundedCornerShape(12.dp)
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -126,11 +160,11 @@ fun HomeScreen(
                 .padding(horizontal = T.screenPadding)
         ) {
             // ── Header ────────────────────────────────────────
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.statusBarsPadding())
             Row(
                 modifier              = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically
             ) {
@@ -141,9 +175,88 @@ fun HomeScreen(
                     fontSize   = 22.sp,
                     color      = T.Ink
                 )
-                InkStamp(label = "SCORE $agenticScore", isOnline = isOnline)
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    InkStamp(label = "SCORE $agenticScore", isOnline = !isOffline)
+
+                    // Refresh icon — tap = refresh · long press = clear cache
+                    val (iconBg, iconFg, iconBdr) = when {
+                        isRefreshing                      -> Triple(FreshGreyBg,  FreshGreyFg,  FreshGreyBdr)
+                        freshness == CacheFreshness.GREEN -> Triple(FreshGreenBg, FreshGreenFg, FreshGreenBdr)
+                        freshness == CacheFreshness.AMBER -> Triple(FreshAmberBg, FreshAmberFg, FreshAmberBdr)
+                        freshness == CacheFreshness.RED   -> Triple(FreshRedBg,   FreshRedFg,   FreshRedBdr)
+                        else                              -> Triple(FreshGreyBg,  FreshGreyFg,  FreshGreyBdr)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .background(iconBg, RoundedCornerShape(6.dp))
+                            .border(0.5.dp, iconBdr, RoundedCornerShape(6.dp))
+                            .pointerInput(isRefreshing) {
+                                detectTapGestures(
+                                    onTap       = { viewModel.refresh() },
+                                    onLongPress = { showClearDialog = true }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val rotation = if (isRefreshing) spinAngle else 0f
+                        Text(
+                            text     = "↻",
+                            fontSize = 16.sp,
+                            color    = iconFg,
+                            modifier = Modifier.graphicsLayer { rotationZ = rotation }
+                        )
+                    }
+                }
             }
+
+            // ── Freshness pill ────────────────────────────────
+            val (pillBg, pillFg, pillText) = when {
+                isRefreshing                      -> Triple(FreshGreyBg,  FreshGreyFg,  "Refreshing…")
+                freshness == CacheFreshness.NONE  -> Triple(FreshGreyBg,  FreshGreyFg,  "Connecting…")
+                freshness == CacheFreshness.GREEN -> Triple(FreshGreenBg, FreshGreenFg, "Live · $ageLabel")
+                freshness == CacheFreshness.AMBER -> Triple(FreshAmberBg, FreshAmberFg, "Cached · $ageLabel")
+                freshness == CacheFreshness.RED   -> Triple(FreshRedBg,   FreshRedFg,   "Stale · $ageLabel")
+                else                              -> Triple(FreshGreyBg,  FreshGreyFg,  "")
+            }
+            if (pillText.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 6.dp)
+                        .background(pillBg, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(text = pillText, fontSize = 10.sp, color = pillFg)
+                }
+            }
+
             HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
+
+            // ── Offline banner ────────────────────────────────
+            if (isOffline && !isRefreshing) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(FreshAmberBg)
+                        .padding(vertical = 6.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(FreshAmberFg, RoundedCornerShape(3.dp))
+                    )
+                    Text(
+                        text     = "VitaClaw unreachable · showing cached data",
+                        fontSize = 11.sp,
+                        color    = FreshAmberFg
+                    )
+                }
+            }
 
             // ── Quote insight line ────────────────────────────
             val quote       = briefData?.structured?.quote
@@ -153,7 +266,6 @@ fun HomeScreen(
                 quote != null                        -> "\"$quote\""
                 else                                 -> "Synthesising daily insights…"
             }
-
             Text(
                 text       = insightText,
                 fontFamily = T.Serif,
@@ -200,7 +312,7 @@ fun HomeScreen(
     }
 }
 
-// ── Turbine canvas ────────────────────────────────────────────
+// ── Turbine canvas — unchanged ────────────────────────────────
 @Composable
 private fun TurbineCanvas(
     navController: NavController,
@@ -238,14 +350,14 @@ private fun TurbineCanvas(
 
     Box(modifier = modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val cx      = size.width / 2f
-            val cy      = size.height * 0.45f
-            val innerR  = INNER_RADIUS_DP.dp.toPx()
-            val outerR  = OUTER_RADIUS_DP.dp.toPx()
-            val ringR   = RING_RADIUS_DP.dp.toPx()
-            val ringStr = RING_STROKE_DP.dp.toPx()
+            val cx         = size.width / 2f
+            val cy         = size.height * 0.45f
+            val innerR     = INNER_RADIUS_DP.dp.toPx()
+            val outerR     = OUTER_RADIUS_DP.dp.toPx()
+            val ringR      = RING_RADIUS_DP.dp.toPx()
+            val ringStr    = RING_STROKE_DP.dp.toPx()
             val innerCircR = RING_INNER_DP.dp.toPx()
-            val centre  = Offset(cx, cy)
+            val centre     = Offset(cx, cy)
 
             BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
                 drawBlade(
@@ -257,7 +369,6 @@ private fun TurbineCanvas(
                 )
             }
 
-            // Stem
             val stemW   = 6.dp.toPx()
             val stemH   = 24.dp.toPx()
             val stemTop = cy + ringR + ringStr / 2f
@@ -272,16 +383,12 @@ private fun TurbineCanvas(
                 topLeft = Offset(cx - stemW * 1.5f, stemTop + stemH),
                 size    = androidx.compose.ui.geometry.Size(stemW * 3f, 4.dp.toPx())
             )
-
-            // Outer border circle
             drawCircle(
                 color  = T.Ink,
                 radius = (RING_RADIUS_DP + 4).dp.toPx(),
                 center = centre,
                 style  = Stroke(width = 1.5.dp.toPx())
             )
-
-            // Ring track
             drawCircle(color = T.Paper, radius = ringR, center = centre)
             drawCircle(
                 color  = Color(0xFFE8E4DC),
@@ -289,8 +396,6 @@ private fun TurbineCanvas(
                 center = centre,
                 style  = Stroke(width = ringStr)
             )
-
-            // Recovery arc
             val arcColor = recoveryArcColor(recoveryArc)
             val sweep    = (recoveryArc / 100f) * 360f
             drawArc(
@@ -302,12 +407,9 @@ private fun TurbineCanvas(
                 size       = androidx.compose.ui.geometry.Size(ringR * 2, ringR * 2),
                 style      = Stroke(width = ringStr, cap = StrokeCap.Butt)
             )
-
-            // Inner cream circle
             drawCircle(color = T.Paper, radius = innerCircR, center = centre)
         }
 
-        // ── Blade click targets — Health now routes to "health" ──
         val bladeNavRoutes = listOf("energy", "portfolio_detail", "health_detail")
         BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
             val radians = Math.toRadians(angleDeg.toDouble())
@@ -323,7 +425,6 @@ private fun TurbineCanvas(
             )
         }
 
-        // Centre ring click — routes to health
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -331,7 +432,6 @@ private fun TurbineCanvas(
                 .clickable { navController.navigate("health_detail") }
         )
 
-        // Centre text
         Column(
             modifier            = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -354,7 +454,6 @@ private fun TurbineCanvas(
             )
         }
 
-        // Blade labels
         BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
             val (domainLabel, metricLabel) = bladeLabels[i]
             val radians = Math.toRadians(angleDeg.toDouble())
@@ -422,7 +521,7 @@ private fun DrawScope.drawBlade(
             sweepAngleDegrees = BLADE_ARC_DEG,
             forceMoveTo       = false
         )
-        val p3 = angToOffset(innerEndDeg, innerR)
+        val p3    = angToOffset(innerEndDeg, innerR)
         lineTo(p3.x, p3.y)
         val iLeft = centre.x - innerR
         val iTop  = centre.y - innerR
@@ -437,7 +536,7 @@ private fun DrawScope.drawBlade(
     }
 
     drawPath(path, color = BLADE_FILL.copy(alpha = alpha))
-    drawPath(path, color = BLADE_STROKE.copy(alpha = alpha), style = Stroke(width = 2.dp.toPx()))
+    drawPath(path, color = BLADE_STROKE_COLOR.copy(alpha = alpha), style = Stroke(width = 2.dp.toPx()))
 }
 
 // ── Recovery arc colour ───────────────────────────────────────
@@ -512,7 +611,7 @@ fun InkModuleRow(
     HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
 }
 
-// ── Morning brief (kept for reference, not rendered on screen) ─
+// ── Morning brief (reference, not rendered on screen) ─────────
 @Composable
 fun MorningBriefInk(brief: BriefResponse?) {
     var isExpanded by remember { mutableStateOf(false) }
@@ -538,7 +637,7 @@ fun MorningBriefInk(brief: BriefResponse?) {
             fontFamily = FontFamily.Default,
             fontWeight = FontWeight.Normal,
             fontSize   = 14.sp,
-            lineHeight  = 22.sp,
+            lineHeight = 22.sp,
             color      = T.Ink,
             maxLines   = if (isExpanded) Int.MAX_VALUE else 3,
             overflow   = TextOverflow.Ellipsis
