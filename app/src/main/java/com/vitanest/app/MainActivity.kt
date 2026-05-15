@@ -2,7 +2,8 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // MainActivity — BuddieViewModel scoped to activity, survives tab switches
-// Updated: dca_detail/{ticker} route added ☘️
+// Updated: health route now renders GrowthScreen (Health accessible via turbine petal);
+//          dca_detail/{ticker} route retained ☘️
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -88,7 +89,19 @@ class MainActivity : ComponentActivity() {
                                 repository    = vitaClawRepository
                             )
                         }
+                        // "health" route now renders GrowthScreen.
+                        // HealthScreen is still reachable via the turbine Health petal
+                        // and centre ring on HomeScreen — both navigate to "health".
+                        // The bottom nav tab label is updated in InkBottomNav (HomeScreen.kt).
                         composable("health") {
+                            GrowthScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository
+                            )
+                        }
+                        // Dedicated health route — used when navigating directly to HealthScreen
+                        // e.g. from a future deep link or system status tile.
+                        composable("health_detail") {
                             HealthScreen(
                                 navController = navController,
                                 repository    = vitaClawRepository

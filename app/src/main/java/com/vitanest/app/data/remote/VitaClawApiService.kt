@@ -2,9 +2,10 @@ package com.vitanest.app.data.remote
 
 // © 2026 Sumeet Garg — VitaNest
 // VitaClawApiService — all data models + Retrofit interface
-// Updated: DCA models added (DcaDetailResponse, OrdersSummaryResponse);
-//          Position pnl_pct field added; /portfolio/dca + /portfolio/orders wired;
-//          Buddie observations models + endpoints added ☘️
+// Updated: BuddieInsights model fixed (new domain-keyed shape);
+//          ObservationItem + DomainMemory updated (confidence_calibrated,
+//          observation_type, domain_memory); GrowthResponse + GrowthSeries
+//          added for /growth endpoint ☘️
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -330,12 +331,32 @@ data class ExDivAlert(
     @SerialName("is_alert") val isAlert: Boolean
 )
 
+// ── Buddie Insights (embedded in /brief structured) ───────────
+// API shape: { "finance": { "label": "Money", "observations": [...] }, ... }
+// Previous shape (whoop/t212/myenergi strings) was wrong — replaced entirely.
+
+@Serializable
+data class BuddieInsightObservation(
+    val domain: String,
+    val content: String,
+    @SerialName("confidence_raw")    val confidenceRaw: Double,
+    @SerialName("observation_type") val observationType: String = "observation"
+)
+
+@Serializable
+data class BuddieInsightDomain(
+    val label: String,                                          // "Money" | "Health" | "Energy"
+    val observations: List<BuddieInsightObservation> = emptyList()
+)
+
 @Serializable
 data class BuddieInsights(
-    val whoop: String? = null,
-    val t212: String? = null,
-    val myenergi: String? = null
+    val finance: BuddieInsightDomain? = null,
+    val health:  BuddieInsightDomain? = null,
+    val energy:  BuddieInsightDomain? = null
 )
+
+// ── Brief structured ──────────────────────────────────────────
 
 @Serializable
 data class BriefStructured(
@@ -459,18 +480,33 @@ data class EnergyResponse(
     @SerialName("last_updated")            val lastUpdated: String
 )
 
-// ── Buddie Observations ───────────────────────────────────────
+// ── Buddie Observations (/buddie/observations/today) ──────────
+// domain_memory: cached per parent_domain — don't re-fetch per card.
+// v0 · 0 obs = new domain, render in muted grey.
+
+@Serializable
+data class DomainMemory(
+    @SerialName("parent_domain")      val parentDomain: String,   // "finance" | "health" | "energy"
+    val version: Int = 0,
+    @SerialName("total_observations") val totalObservations: Int = 0
+)
 
 @Serializable
 data class ObservationItem(
     val id: Int,
     val domain: String,
-    val action: String,
+    val action: String,                                             // "OBSERVE: claim_id" — strip prefix for display
     val content: String,
     val confidence: Double,
+    @SerialName("confidence_calibrated") val confidenceCalibrated: Double? = null,  // null → show "—"
+    @SerialName("observation_type")      val observationType: String = "observation", // "observation" | "hypothesis"
     val rating: String? = null,
-    @SerialName("created_at") val createdAt: String = ""
-)
+    @SerialName("created_at")            val createdAt: String = "",
+    @SerialName("domain_memory")         val domainMemory: DomainMemory? = null
+) {
+    // Strip "OBSERVE: " prefix — display claim_id only
+    val claimId: String get() = action.removePrefix("OBSERVE: ").trim()
+}
 
 @Serializable
 data class ObservationsResponse(
@@ -481,6 +517,60 @@ data class ObservationsResponse(
 
 @Serializable
 data class FeedbackRequest(val rating: String)
+
+// ── Growth (/growth) ──────────────────────────────────────────
+// Series fields are all nullable — new columns appear as VitaClaw adds them.
+// Never hardcode column positions — always access by key name.
+// date is "YYYY-MM-DD" string — sort as string (ISO format is safe).
+
+@Serializable
+data class GrowthSummary(
+    @SerialName("portfolio_start_gbp")      val portfolioStartGbp: Double? = null,
+    @SerialName("portfolio_end_gbp")        val portfolioEndGbp: Double? = null,
+    @SerialName("portfolio_change_gbp")     val portfolioChangeGbp: Double? = null,
+    @SerialName("portfolio_change_pct")     val portfolioChangePct: Double? = null,
+    @SerialName("avg_recovery")             val avgRecovery: Double? = null,
+    @SerialName("avg_spo2_pct")             val avgSpo2Pct: Double? = null,
+    @SerialName("spo2_below_threshold")     val spo2BelowThreshold: Int? = null,
+    @SerialName("income_30d_gbp")           val income30dGbp: Double? = null,
+    @SerialName("income_gap_to_target_gbp") val incomeGapToTargetGbp: Double? = null
+)
+
+@Serializable
+data class GrowthSeries(
+    val date: String,
+    // Portfolio
+    @SerialName("equity_gbp")              val equityGbp: Double? = null,
+    @SerialName("pnl_gbp")                val pnlGbp: Double? = null,
+    @SerialName("deposits_mtd")            val depositsMtd: Double? = null,
+    // Health
+    @SerialName("recovery_score")          val recoveryScore: Double? = null,
+    @SerialName("recovery_zone")           val recoveryZone: String? = null,  // "green"|"yellow"|"red"
+    @SerialName("hrv_ms")                  val hrvMs: Double? = null,
+    @SerialName("rhr_bpm")                 val rhrBpm: Double? = null,
+    @SerialName("spo2_pct")               val spo2Pct: Double? = null,       // null for older rows — skip in chart
+    // Energy
+    @SerialName("solar_kwh")              val solarKwh: Double? = null,
+    @SerialName("self_sufficiency_pct")   val selfSufficiencyPct: Double? = null,
+    @SerialName("energy_savings_gbp")     val energySavingsGbp: Double? = null,
+    // Income
+    @SerialName("income_mtd_gbp")         val incomeMtdGbp: Double? = null,
+    @SerialName("income_30d_gbp")         val income30dGbp: Double? = null,
+    @SerialName("income_gap_to_target_gbp") val incomeGapToTargetGbp: Double? = null,
+    // Buddie
+    @SerialName("ghost_actions_total")    val ghostActionsTotal: Int? = null,
+    @SerialName("llm_cost_usd")           val llmCostUsd: Double? = null,
+    @SerialName("calibrated_domains_count") val calibratedDomainsCount: Int? = null
+)
+
+@Serializable
+data class GrowthResponse(
+    val days: Int,
+    val from: String,
+    val to: String,
+    val summary: GrowthSummary,
+    val series: List<GrowthSeries> = emptyList()
+)
 
 // ── Retrofit interface ────────────────────────────────────────
 
@@ -558,4 +648,11 @@ interface VitaClawApiService {
         @Path("id") id: Int,
         @Body body: FeedbackRequest
     ): Response<Unit>
+
+    @GET("growth")
+    suspend fun getGrowth(
+        @Query("days")      days: Int? = null,
+        @Query("from_date") fromDate: String? = null,
+        @Query("to_date")   toDate: String? = null
+    ): Response<GrowthResponse>
 }

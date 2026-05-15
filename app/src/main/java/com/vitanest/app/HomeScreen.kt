@@ -308,7 +308,7 @@ private fun TurbineCanvas(
         }
 
         // ── Blade click targets — Health now routes to "health" ──
-        val bladeNavRoutes = listOf("energy", "portfolio_detail", "health")
+        val bladeNavRoutes = listOf("energy", "portfolio_detail", "health_detail")
         BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
             val radians = Math.toRadians(angleDeg.toDouble())
             val midR    = (INNER_RADIUS_DP + OUTER_RADIUS_DP) / 2f
@@ -328,7 +328,7 @@ private fun TurbineCanvas(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size((RING_RADIUS_DP * 2).dp)
-                .clickable { navController.navigate("health") }
+                .clickable { navController.navigate("health_detail") }
         )
 
         // Centre text
@@ -557,7 +557,7 @@ fun InkBottomNav(
         Triple("home",             "Home ☘️", "home"),
         Triple("portfolio_detail", "Finance",  "portfolio_detail"),
         Triple("energy",           "Energy",   "energy"),
-        Triple("health",           "Health",   "health"),
+        Triple("health",           "Growth",   "health"),
         Triple("ask",              "Ask",      "ask")
     )
 

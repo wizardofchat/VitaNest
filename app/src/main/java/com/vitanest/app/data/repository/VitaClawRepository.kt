@@ -3,7 +3,8 @@ package com.vitanest.app.data.repository
 // © 2026 Sumeet Garg — VitaNest
 // VitaClawRepository — all API calls, single source of truth
 // Updated: getDcaDetail + getPortfolioOrders added;
-//          getTodayObservations + postObservationFeedback added ☘️
+//          getTodayObservations + postObservationFeedback added;
+//          getGrowth added for /growth endpoint ☘️
 
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
@@ -17,6 +18,7 @@ import com.vitanest.app.data.remote.DividendDataResponse
 import com.vitanest.app.data.remote.EnergyResponse
 import com.vitanest.app.data.remote.FeedbackRequest
 import com.vitanest.app.data.remote.GoalsResponse
+import com.vitanest.app.data.remote.GrowthResponse
 import com.vitanest.app.data.remote.HealthResponse
 import com.vitanest.app.data.remote.IntentsResponse
 import com.vitanest.app.data.remote.ObservationsResponse
@@ -148,7 +150,7 @@ open class VitaClawRepository {
             if (r.isSuccessful) {
                 val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response from /portfolio"))
+                else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
@@ -265,6 +267,7 @@ open class VitaClawRepository {
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /buddie/observations/today"))
             } else if (r.code() == 404) {
+                // No observations today — return empty, not an error
                 Result.success(ObservationsResponse(date = "", count = 0, observations = emptyList()))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
@@ -275,6 +278,31 @@ open class VitaClawRepository {
             val r = apiService.postObservationFeedback(id, FeedbackRequest(rating = rating))
             if (r.isSuccessful) Result.success(Unit)
             else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Growth ───────────────────────────────────────────────
+    // days: rolling window (default 30); fromDate/toDate: explicit range (YYYY-MM-DD).
+    // Pass days only, or fromDate+toDate only — not both.
+
+    open suspend fun getGrowth(
+        days: Int? = 30,
+        fromDate: String? = null,
+        toDate: String? = null
+    ): Result<GrowthResponse> {
+        return try {
+            // If explicit date range provided, send that and suppress days param
+            val effectiveDays    = if (fromDate != null) null else days
+            val r = apiService.getGrowth(
+                days     = effectiveDays,
+                fromDate = fromDate,
+                toDate   = toDate
+            )
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /growth"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
 }

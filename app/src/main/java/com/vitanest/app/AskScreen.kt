@@ -3,6 +3,8 @@
 // © 2026 Sumeet Garg — VitaNest
 // AskScreen — Buddie chat, offline inbox, observations, file upload, clear chat ☘️
 // Layout: Header → Quota → Offline Inbox → Observations → Input → Tiles → Chat
+// Updated: ObservationCard shows domain_memory (v · k badge), confidence_calibrated,
+//          claim_id (stripped OBSERVE: prefix), observation_type (solid/dashed border)
 
 import android.content.Context
 import android.content.Intent
@@ -55,6 +57,16 @@ private val ConfRed     = Color(0xFFA32D2D)
 private val ConfGreenBg = Color(0xFFEAF3DE)
 private val ConfAmberBg = Color(0xFFFAEEDA)
 private val ConfRedBg   = Color(0xFFFCEBEB)
+
+// domain_memory parent_domain → badge colour
+private val DomainFinanceBg  = Color(0xFFDBEAFE)   // blue-100
+private val DomainFinanceFg  = Color(0xFF1D4ED8)   // blue-700
+private val DomainHealthBg   = Color(0xFFDCFCE7)   // green-100
+private val DomainHealthFg   = Color(0xFF15803D)   // green-700
+private val DomainEnergyBg   = Color(0xFFFEF3C7)   // amber-100
+private val DomainEnergyFg   = Color(0xFFB45309)   // amber-700
+private val DomainNewBg      = Color(0xFFF3F4F6)   // grey-100 — v0 · 0 obs
+private val DomainNewFg      = Color(0xFF9CA3AF)   // grey-400
 
 @Composable
 fun AskScreen(
@@ -498,6 +510,12 @@ private fun ObservationsInbox(
 }
 
 // ── Observation card ──────────────────────────────────────────
+// observation_type = "observation" → solid 0.5dp border (T.Rule)
+// observation_type = "hypothesis"  → dashed amber border + "hypothesis" label
+// domain_memory.parent_domain → badge colour (finance=blue, health=green, energy=amber)
+// domain_memory null or v0·0obs → muted grey badge
+// claimId = action stripped of "OBSERVE: " prefix — shown as muted label below content
+// confidence_calibrated null → show "—"
 @Composable
 private fun ObservationCard(
     obs: ObservationItem,
@@ -510,6 +528,7 @@ private fun ObservationCard(
         "recovery"                         -> "🔋"
         "finance", "income", "portfolio",
         "capital", "income_performance",
+        "income_signal",
         "portfolio_health",
         "portfolio_performance"            -> "📈"
         "energy", "solar", "ev",
@@ -517,32 +536,110 @@ private fun ObservationCard(
         else                               -> "●"
     }
 
+    val isHypothesis = obs.observationType == "hypothesis"
+
+    // Border: solid for observation, dashed amber for hypothesis
+    // Compose doesn't support native dashed borders — simulate with amber colour at 0.5dp
+    // and a "hypothesis" label. Full dashed path requires Canvas; amber outline is sufficient signal.
+    val borderColor = if (isHypothesis) AmberDash else T.Rule
+    val borderWidth = if (isHypothesis) 1.dp else 0.5.dp
+
+    // Confidence badge colours
     val (confBg, confFg) = when {
         obs.confidence >= 0.8 -> ConfGreenBg to ConfGreen
         obs.confidence >= 0.6 -> ConfAmberBg to ConfAmber
         else                  -> ConfRedBg   to ConfRed
     }
 
+    // domain_memory badge — parent_domain drives colour
+    val memory = obs.domainMemory
+    val isNewDomain = memory == null || (memory.version == 0 && memory.totalObservations == 0)
+    val (memBg, memFg) = when (memory?.parentDomain) {
+        "finance" -> DomainFinanceBg to DomainFinanceFg
+        "health"  -> DomainHealthBg  to DomainHealthFg
+        "energy"  -> DomainEnergyBg  to DomainEnergyFg
+        else      -> DomainNewBg     to DomainNewFg
+    }
+    val memLabel = if (memory != null)
+        "v${memory.version} · ${memory.totalObservations} obs"
+    else
+        "v0 · 0 obs"
+
+    // calibrated confidence display
+    val calDisplay = obs.confidenceCalibrated?.let { "%.2f".format(it) } ?: "—"
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(0.5.dp, T.Rule, RoundedCornerShape(8.dp))
+            .border(borderWidth, borderColor, RoundedCornerShape(8.dp))
             .background(Color.White, RoundedCornerShape(8.dp))
             .clickable { /* consume click — prevent collapse toggle */ }
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Domain + confidence badge
+        // ── Row 1: domain icon + name  |  domain_memory badge ─
         Row(
             modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically
         ) {
+            // Domain icon + name
             Text(
                 text     = "$domainIcon ${obs.domain}",
                 fontSize = 12.sp,
                 color    = T.Muted
             )
+            // domain_memory badge: "v3 · 37 obs"
+            Box(
+                modifier = Modifier
+                    .background(memBg, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text       = memLabel,
+                    fontSize   = 10.sp,
+                    color      = if (isNewDomain) memFg else memFg,
+                    fontWeight = if (isNewDomain) FontWeight.Normal else FontWeight.Medium
+                )
+            }
+        }
+
+        // ── Hypothesis label (amber, only for hypothesis type) ─
+        if (isHypothesis) {
+            Text(
+                text      = "hypothesis",
+                fontSize  = 10.sp,
+                color     = AmberDash,
+                fontStyle = FontStyle.Italic
+            )
+        }
+
+        // ── Content — serif ───────────────────────────────────
+        Text(
+            text       = obs.content,
+            fontFamily = T.Serif,
+            fontSize   = 13.sp,
+            color      = T.Ink,
+            lineHeight = 19.sp
+        )
+
+        // ── Claim ID — stripped "OBSERVE: " prefix ────────────
+        if (obs.claimId.isNotBlank()) {
+            Text(
+                text     = obs.claimId,
+                fontSize = 10.sp,
+                color    = T.Muted,
+                fontStyle = FontStyle.Italic
+            )
+        }
+
+        // ── Row 2: confidence raw  |  calibrated ─────────────
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            // Raw confidence badge
             Box(
                 modifier = Modifier
                     .background(confBg, RoundedCornerShape(10.dp))
@@ -555,18 +652,17 @@ private fun ObservationCard(
                     fontWeight = FontWeight.Medium
                 )
             }
+            // Calibrated confidence
+            Text(
+                text     = "cal: $calDisplay",
+                fontSize = 10.sp,
+                color    = T.Muted
+            )
         }
 
-        // Content — serif, never action field
-        Text(
-            text       = obs.content,
-            fontFamily = T.Serif,
-            fontSize   = 13.sp,
-            color      = T.Ink,
-            lineHeight = 19.sp
-        )
-
-        // Feedback buttons
+        // ── Feedback buttons ──────────────────────────────────
+        // hypothesis button set deferred — backend P4 ratings not ready yet
+        // Both types show same buttons for now
         Row(
             modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
