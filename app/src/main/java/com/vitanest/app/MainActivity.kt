@@ -1,9 +1,7 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// MainActivity — BuddieViewModel + HomeViewModel scoped to activity.
-// HomeViewModel loads once on app open. BuddieViewModel receives cached
-// brief from HomeViewModel so Ask screen never fetches brief separately. ☘️
+// MainActivity — all routes including portfolio_lens ☘️
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -31,7 +29,6 @@ class MainActivity : ComponentActivity() {
 
     private val vitaClawRepository = VitaClawRepository()
 
-    // Home — loads once, survives tab switches, owns cache layer
     private val homeViewModel: HomeViewModel by viewModels {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -40,7 +37,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Buddie — scoped to activity, survives tab switches
     private val buddieViewModel: BuddieViewModel by viewModels {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -59,20 +55,14 @@ class MainActivity : ComponentActivity() {
                     color    = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
-
-                    // Observe brief from HomeViewModel — passed to Buddie so
-                    // Ask screen shows brief instantly from cache, no extra fetch
-                    val cachedBrief by homeViewModel.briefData.collectAsState()
+                    val cachedBrief   by homeViewModel.briefData.collectAsState()
 
                     NavHost(
                         navController    = navController,
                         startDestination = "home"
                     ) {
                         composable("home") {
-                            HomeScreen(
-                                navController = navController,
-                                viewModel     = homeViewModel
-                            )
+                            HomeScreen(navController = navController, viewModel = homeViewModel)
                         }
                         composable("sicksense") {
                             PulseDetailScreen(
@@ -81,46 +71,28 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("portfolio_detail") {
-                            FinanceScreen(
-                                navController = navController,
-                                repository    = vitaClawRepository
-                            )
+                            FinanceScreen(navController = navController, repository = vitaClawRepository)
+                        }
+                        composable("portfolio_lens") {
+                            PortfolioLensScreen(navController = navController, repository = vitaClawRepository)
                         }
                         composable("dca_detail/{ticker}") { backStackEntry ->
-                            val ticker = backStackEntry.arguments
-                                ?.getString("ticker") ?: ""
-                            DcaDetailScreen(
-                                navController = navController,
-                                repository    = vitaClawRepository,
-                                ticker        = ticker
-                            )
+                            val ticker = backStackEntry.arguments?.getString("ticker") ?: ""
+                            DcaDetailScreen(navController = navController,
+                                repository = vitaClawRepository, ticker = ticker)
                         }
                         composable("ask") {
-                            // Pass cached brief — Buddie shows it instantly
-                            // initialise() is guarded — only runs once ever
                             buddieViewModel.initialise(cachedBrief = cachedBrief)
-                            AskScreen(
-                                navController = navController,
-                                viewModel     = buddieViewModel
-                            )
+                            AskScreen(navController = navController, viewModel = buddieViewModel)
                         }
                         composable("energy") {
-                            EnergyDetailScreen(
-                                navController = navController,
-                                repository    = vitaClawRepository
-                            )
+                            EnergyDetailScreen(navController = navController, repository = vitaClawRepository)
                         }
                         composable("health") {
-                            GrowthScreen(
-                                navController = navController,
-                                repository    = vitaClawRepository
-                            )
+                            GrowthScreen(navController = navController, repository = vitaClawRepository)
                         }
                         composable("health_detail") {
-                            HealthScreen(
-                                navController = navController,
-                                repository    = vitaClawRepository
-                            )
+                            HealthScreen(navController = navController, repository = vitaClawRepository)
                         }
                         composable("council") {
                             ComingSoonScreen(onBack = { navController.popBackStack() })
@@ -153,22 +125,15 @@ fun ComingSoonScreen(onBack: () -> Unit) {
                 title = { Text("Coming Soon") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
         }
     ) { innerPadding ->
         Box(
-            modifier         = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+            modifier         = Modifier.fillMaxSize().padding(innerPadding),
             contentAlignment = Alignment.Center
-        ) {
-            Text("This feature is coming soon!")
-        }
+        ) { Text("This feature is coming soon!") }
     }
 }

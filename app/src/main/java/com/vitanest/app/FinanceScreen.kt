@@ -1,13 +1,16 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// FinanceScreen — Pies tab (existing) + Holdings tab (new, tap → DCA) ☘️
+// FinanceScreen — scrollable tabs: Pies · Holdings · Portfolio lens · Dividend sim ☘️
+// Updated: Option C scrollable tab pattern; Portfolio lens tab added.
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -25,19 +28,24 @@ import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.repository.VitaClawRepository
 import com.vitanest.app.ui.theme.VitaNestTheme as T
 
-private enum class FinanceTab { PIES, HOLDINGS }
+private enum class FinanceTab(val label: String) {
+    PIES("Pies"),
+    HOLDINGS("Holdings"),
+    LENS("Portfolio lens"),
+    DIVIDEND_SIM("Dividend sim")
+}
 
 @Composable
 fun FinanceScreen(
     navController: NavController,
     repository: VitaClawRepository
 ) {
-    var piesData      by remember { mutableStateOf<PiesResponse?>(null) }
-    var portfolioData by remember { mutableStateOf<PortfolioResponse?>(null) }
-    var isLoadingPies by remember { mutableStateOf(true) }
+    var piesData          by remember { mutableStateOf<PiesResponse?>(null) }
+    var portfolioData     by remember { mutableStateOf<PortfolioResponse?>(null) }
+    var isLoadingPies     by remember { mutableStateOf(true) }
     var isLoadingHoldings by remember { mutableStateOf(false) }
-    var activeTab     by remember { mutableStateOf(FinanceTab.PIES) }
-    var searchQuery   by remember { mutableStateOf("") }
+    var activeTab         by remember { mutableStateOf(FinanceTab.PIES) }
+    var searchQuery       by remember { mutableStateOf("") }
 
     // Load pies on entry
     LaunchedEffect(Unit) {
@@ -69,10 +77,15 @@ fun FinanceScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = T.screenPadding)
+                    .background(Color.White)
             ) {
                 Spacer(modifier = Modifier.height(52.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier          = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = T.screenPadding),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     IconButton(
                         onClick  = { navController.popBackStack() },
                         modifier = Modifier.size(24.dp)
@@ -96,36 +109,44 @@ fun FinanceScreen(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
-                Spacer(modifier = Modifier.height(12.dp))
 
-                // ── Tab toggle ────────────────────────────────
+                // ── Scrollable tab row (Option C) ─────────────
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(T.Ink.copy(alpha = 0.08f))
+                        .horizontalScroll(rememberScrollState())
                 ) {
                     FinanceTab.entries.forEach { tab ->
-                        val selected = activeTab == tab
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(if (selected) T.Ink else Color.Transparent)
+                        val active = activeTab == tab
+                        Column(
+                            modifier            = Modifier
                                 .clickable { activeTab = tab }
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text  = tab.name.lowercase().replaceFirstChar { it.uppercase() },
-                                style = T.meta.copy(
-                                    color = if (selected) T.Paper else T.Ink
+                                text       = tab.label,
+                                style      = T.meta.copy(
+                                    color      = if (active) T.Ink else T.Muted,
+                                    fontWeight = if (active)
+                                        androidx.compose.ui.text.font.FontWeight.Medium
+                                    else
+                                        androidx.compose.ui.text.font.FontWeight.Normal
                                 )
                             )
+                            if (active) {
+                                Spacer(Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(24.dp)
+                                        .height(2.dp)
+                                        .background(T.Ink)
+                                )
+                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
             }
 
             // ── Tab content ───────────────────────────────────
@@ -138,14 +159,37 @@ fun FinanceScreen(
                 }
                 FinanceTab.HOLDINGS -> {
                     HoldingsContent(
-                        portfolioData = portfolioData,
-                        isLoading     = isLoadingHoldings,
-                        searchQuery   = searchQuery,
+                        portfolioData  = portfolioData,
+                        isLoading      = isLoadingHoldings,
+                        searchQuery    = searchQuery,
                         onSearchChange = { searchQuery = it },
-                        onTickerTap   = { ticker ->
+                        onTickerTap    = { ticker ->
                             navController.navigate("dca_detail/$ticker")
                         }
                     )
+                }
+                FinanceTab.LENS -> {
+                    // PortfolioLensScreen is a full standalone screen — launch it
+                    // rather than embedding to keep nav stack clean.
+                    // Tab tap → navigate to "portfolio_lens" route.
+                    // This LaunchedEffect fires once when tab is selected.
+                    LaunchedEffect(Unit) {
+                        navController.navigate("portfolio_lens")
+                        activeTab = FinanceTab.PIES   // reset so back returns to Pies
+                    }
+                    // Show brief loading state while nav fires
+                    Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        CircularProgressIndicator(color = T.Ink, strokeWidth = 1.5.dp)
+                    }
+                }
+                FinanceTab.DIVIDEND_SIM -> {
+                    LaunchedEffect(Unit) {
+                        navController.navigate("dividend_simulator")
+                        activeTab = FinanceTab.PIES
+                    }
+                    Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        CircularProgressIndicator(color = T.Ink, strokeWidth = 1.5.dp)
+                    }
                 }
             }
         }
@@ -161,7 +205,7 @@ fun FinanceScreen(
     }
 }
 
-// ── Holdings tab content ──────────────────────────────────────
+// ── Holdings content ──────────────────────────────────────────
 
 @Composable
 private fun HoldingsContent(
@@ -178,7 +222,6 @@ private fun HoldingsContent(
     ) {
         Spacer(modifier = Modifier.height(8.dp))
 
-        // ── Search bar ────────────────────────────────────────
         OutlinedTextField(
             value         = searchQuery,
             onValueChange = onSearchChange,
@@ -189,25 +232,25 @@ private fun HoldingsContent(
                     style = T.meta
                 )
             },
-            singleLine    = true,
-            modifier      = Modifier.fillMaxWidth(),
-            colors        = OutlinedTextFieldDefaults.colors(
+            singleLine = true,
+            modifier   = Modifier.fillMaxWidth(),
+            colors     = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor   = T.Ink,
                 unfocusedBorderColor = T.Ink.copy(alpha = 0.3f),
                 cursorColor          = T.Ink
             ),
-            textStyle     = T.meta
+            textStyle = T.meta
         )
         Spacer(modifier = Modifier.height(8.dp))
 
         when {
             isLoading -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
                     CircularProgressIndicator(color = T.Ink, strokeWidth = 1.5.dp)
                 }
             }
             portfolioData == null -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
                     Text(text = "No holdings data", style = T.meta)
                 }
             }
@@ -217,38 +260,28 @@ private fun HoldingsContent(
                             pos.ticker.contains(searchQuery, ignoreCase = true) ||
                             pos.name.contains(searchQuery, ignoreCase = true)
                 }
-
-                // Total row
                 Row(
-                    modifier            = Modifier
+                    modifier              = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment   = Alignment.CenterVertically
+                    verticalAlignment     = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text  = "${filtered.size} holdings",
-                        style = T.meta
-                    )
-                    Text(
-                        text  = "£%.2f total".format(portfolioData.totalValueGbp),
-                        style = T.meta
-                    )
+                    Text("${filtered.size} holdings", style = T.meta)
+                    Text("£%.2f total".format(portfolioData.totalValueGbp), style = T.meta)
                 }
                 HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
-
-                // List
                 LazyColumn(
-                    modifier        = Modifier.fillMaxSize(),
-                    contentPadding  = PaddingValues(bottom = 80.dp)
+                    modifier       = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
                     items(filtered, key = { it.ticker }) { position ->
                         HoldingRow(
-                            ticker    = position.ticker,
-                            name      = position.name,
-                            valueGbp  = position.marketValue,
-                            pnlPct    = position.pnlPct,
-                            onClick   = { onTickerTap(position.ticker) }
+                            ticker   = position.ticker,
+                            name     = position.name,
+                            valueGbp = position.marketValue,
+                            pnlPct   = position.pnlPct,
+                            onClick  = { onTickerTap(position.ticker) }
                         )
                         HorizontalDivider(
                             thickness = 0.5.dp,
@@ -263,43 +296,30 @@ private fun HoldingsContent(
 
 @Composable
 private fun HoldingRow(
-    ticker:   String,
-    name:     String,
+    ticker: String,
+    name: String,
     valueGbp: Double,
-    pnlPct:   Double,
-    onClick:  () -> Unit
+    pnlPct: Double,
+    onClick: () -> Unit
 ) {
     Row(
-        modifier = Modifier
+        modifier          = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Ticker
+        Text(text = ticker, style = T.bodyValue, modifier = Modifier.width(60.dp))
         Text(
-            text     = ticker,
-            style    = T.bodyValue,
-            modifier = Modifier.width(60.dp)
+            text     = name,
+            style    = T.meta,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
-
-        // Name
-        Text(
-            text      = name,
-            style     = T.meta,
-            modifier  = Modifier.weight(1f),
-            maxLines  = 1,
-            overflow  = TextOverflow.Ellipsis
-        )
-
         Spacer(modifier = Modifier.width(8.dp))
-
-        // Value + gain
         Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text  = "£%.2f".format(valueGbp),
-                style = T.bodyValue
-            )
+            Text(text = "£%.2f".format(valueGbp), style = T.bodyValue)
             Text(
                 text  = "%+.2f%%".format(pnlPct),
                 style = T.meta.copy(
@@ -311,8 +331,6 @@ private fun HoldingRow(
                 )
             )
         }
-
-        // Chevron
         Spacer(modifier = Modifier.width(6.dp))
         Text(text = "›", style = T.meta.copy(color = T.Ink.copy(alpha = 0.4f)))
     }

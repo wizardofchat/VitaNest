@@ -174,12 +174,37 @@ data class Position(
 )
 
 @Serializable
+data class LensBreakdownItem(
+    @SerialName("value_gbp")  val valueGbp: Double,
+    @SerialName("weight_pct") val weightPct: Double
+)
+
+@Serializable
+data class LensThresholds(
+    @SerialName("concentration_warning_pct") val concentrationWarningPct: Double = 40.0,
+    @SerialName("currency_warning_pct")      val currencyWarningPct: Double      = 60.0,
+    @SerialName("geography_warning_pct")     val geographyWarningPct: Double     = 60.0,
+    @SerialName("income_type_warning_pct")   val incomeTypeWarningPct: Double    = 60.0,
+    @SerialName("asset_class_warning_pct")   val assetClassWarningPct: Double    = 80.0
+)
+
+@Serializable
 data class PiesResponse(
-    @SerialName("total_value_gbp") val totalValueGbp: Double,
-    @SerialName("total_pnl_gbp")   val totalPnlGbp: Double,
-    @SerialName("total_cash_gbp")  val totalCashGbp: Double,
-    @SerialName("fetched_at")      val fetchedAt: String = "",
-    val pies: List<PieItem> = emptyList()
+    @SerialName("total_value_gbp")       val totalValueGbp: Double,
+    @SerialName("total_pnl_gbp")         val totalPnlGbp: Double,
+    @SerialName("total_cash_gbp")        val totalCashGbp: Double,
+    @SerialName("fetched_at")            val fetchedAt: String = "",
+    val pies: List<PieItem>              = emptyList(),
+    // ── New enriched breakdown blocks ─────────────────────────
+    @SerialName("currency_breakdown")
+    val currencyBreakdown: Map<String, LensBreakdownItem>?    = null,
+    @SerialName("geography_breakdown")
+    val geographyBreakdown: Map<String, LensBreakdownItem>?   = null,
+    @SerialName("income_type_breakdown")
+    val incomeTypeBreakdown: Map<String, LensBreakdownItem>?  = null,
+    @SerialName("asset_class_breakdown")
+    val assetClassBreakdown: Map<String, LensBreakdownItem>?  = null,
+    val thresholds: LensThresholds?                           = null
 )
 
 @Serializable
@@ -194,9 +219,13 @@ data class PieItem(
     @SerialName("holdings_count")       val holdingsCount: Int,
     val status: String? = null,
     @SerialName("dividends_gained_gbp") val dividendsGainedGbp: Double = 0.0,
-    val tickers: List<String> = emptyList()
+    val tickers: List<String>           = emptyList(),
+    // ── New enriched classification fields ────────────────────
+    @SerialName("asset_class")          val assetClass: String? = null,   // etf|trust|reit|commodity|mixed
+    @SerialName("income_type")          val incomeType: String? = null,   // covered_call|income|growth|commodity|mixed
+    val geography: String?              = null,                            // us|uk|global|em|mixed
+    val currency: String?               = null                             // GBP|USD|GBX
 )
-
 // ── DCA ───────────────────────────────────────────────────────
 
 @Serializable
