@@ -29,6 +29,8 @@ import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.WhoopResponse
+import com.vitanest.app.data.remote.IncomeStressRequest
+import com.vitanest.app.data.remote.IncomeStressResponse
 
 open class VitaClawRepository {
 
@@ -205,6 +207,18 @@ open class VitaClawRepository {
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    open suspend fun runIncomeStress(
+        request: IncomeStressRequest
+    ): Result<IncomeStressResponse> {
+        return try {
+            val r = apiService.runIncomeStress(request)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /portfolio/income-stress"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
     // ── Brief ─────────────────────────────────────────────────
 
     open suspend fun getBrief(): Result<BriefResponse> {

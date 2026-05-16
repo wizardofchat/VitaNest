@@ -1,8 +1,7 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// FinanceScreen — scrollable tabs: Pies · Holdings · Portfolio lens · Dividend sim ☘️
-// Updated: Option C scrollable tab pattern; Portfolio lens tab added.
+// FinanceScreen — scrollable tabs: Pies · Holdings · Portfolio lens · Income stress · Dividend sim ☘️
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,6 +31,7 @@ private enum class FinanceTab(val label: String) {
     PIES("Pies"),
     HOLDINGS("Holdings"),
     LENS("Portfolio lens"),
+    INCOME_STRESS("Income stress"),
     DIVIDEND_SIM("Dividend sim")
 }
 
@@ -47,7 +47,6 @@ fun FinanceScreen(
     var activeTab         by remember { mutableStateOf(FinanceTab.PIES) }
     var searchQuery       by remember { mutableStateOf("") }
 
-    // Load pies on entry
     LaunchedEffect(Unit) {
         repository.getPortfolioPies().let { result ->
             if (result.isSuccess) piesData = result.getOrNull()
@@ -55,7 +54,6 @@ fun FinanceScreen(
         }
     }
 
-    // Load holdings when Holdings tab first selected
     LaunchedEffect(activeTab) {
         if (activeTab == FinanceTab.HOLDINGS && portfolioData == null) {
             isLoadingHoldings = true
@@ -125,8 +123,8 @@ fun FinanceScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text       = tab.label,
-                                style      = T.meta.copy(
+                                text  = tab.label,
+                                style = T.meta.copy(
                                     color      = if (active) T.Ink else T.Muted,
                                     fontWeight = if (active)
                                         androidx.compose.ui.text.font.FontWeight.Medium
@@ -169,15 +167,19 @@ fun FinanceScreen(
                     )
                 }
                 FinanceTab.LENS -> {
-                    // PortfolioLensScreen is a full standalone screen — launch it
-                    // rather than embedding to keep nav stack clean.
-                    // Tab tap → navigate to "portfolio_lens" route.
-                    // This LaunchedEffect fires once when tab is selected.
                     LaunchedEffect(Unit) {
                         navController.navigate("portfolio_lens")
-                        activeTab = FinanceTab.PIES   // reset so back returns to Pies
+                        activeTab = FinanceTab.PIES
                     }
-                    // Show brief loading state while nav fires
+                    Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        CircularProgressIndicator(color = T.Ink, strokeWidth = 1.5.dp)
+                    }
+                }
+                FinanceTab.INCOME_STRESS -> {
+                    LaunchedEffect(Unit) {
+                        navController.navigate("income_stress")
+                        activeTab = FinanceTab.PIES
+                    }
                     Box(Modifier.fillMaxSize(), Alignment.Center) {
                         CircularProgressIndicator(color = T.Ink, strokeWidth = 1.5.dp)
                     }
@@ -194,7 +196,6 @@ fun FinanceScreen(
             }
         }
 
-        // ── Bottom nav ────────────────────────────────────────
         InkBottomNav(
             current       = "portfolio_detail",
             navController = navController,

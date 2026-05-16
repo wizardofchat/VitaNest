@@ -1,7 +1,7 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// MainActivity — all routes including portfolio_lens ☘️
+// MainActivity — all routes including portfolio_lens + income_stress ☘️
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -76,10 +76,16 @@ class MainActivity : ComponentActivity() {
                         composable("portfolio_lens") {
                             PortfolioLensScreen(navController = navController, repository = vitaClawRepository)
                         }
+                        composable("income_stress") {
+                            IncomeStressScreen(navController = navController, repository = vitaClawRepository)
+                        }
                         composable("dca_detail/{ticker}") { backStackEntry ->
                             val ticker = backStackEntry.arguments?.getString("ticker") ?: ""
-                            DcaDetailScreen(navController = navController,
-                                repository = vitaClawRepository, ticker = ticker)
+                            DcaDetailScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository,
+                                ticker        = ticker
+                            )
                         }
                         composable("ask") {
                             buddieViewModel.initialise(cachedBrief = cachedBrief)

@@ -3,9 +3,10 @@ package com.vitanest.app.data.remote
 // © 2026 Sumeet Garg — VitaNest
 // VitaClawApiService — all data models + Retrofit interface
 // Updated: BuddieInsights model fixed (new domain-keyed shape);
-//          ObservationItem + DomainMemory updated (confidence_calibrated,
-//          observation_type, domain_memory); GrowthResponse + GrowthSeries
-//          added for /growth endpoint ☘️
+//          ObservationItem + DomainMemory updated;
+//          GrowthResponse + GrowthSeries added;
+//          LensBreakdownItem + LensThresholds + enriched PiesResponse/PieItem;
+//          IncomeStress models added for POST /portfolio/income-stress ☘️
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -46,10 +47,10 @@ data class QuotaClaude(
 data class QuotaResponse(
     val gemini: QuotaGemini,
     val claude: QuotaClaude,
-    val status: String          // "ok" | "quota_exceeded"
+    val status: String
 )
 
-// ── Ask (legacy — kept for backward compat) ───────────────────
+// ── Ask (legacy) ──────────────────────────────────────────────
 
 @Serializable
 data class AskRequest(
@@ -97,21 +98,18 @@ data class ChatOpeningResponse(
 
 @Serializable
 data class ChatHistoryEntry(
-    val role: String,           // "user" | "buddy"
+    val role: String,
     val message: String,
     val provenance: String = "",
     @SerialName("elapsed_ms") val elapsedMs: Long = 0L,
-    val ts: String = ""         // "2026-05-05 15:27:22.543285+00:00"
+    val ts: String = ""
 )
 
-// API returns a flat array — deserialise as list directly
-// Repository wraps it: if response is List<ChatHistoryEntry>, use ChatHistoryResponse as wrapper
 @Serializable
 data class ChatHistoryResponse(
     val exchanges: List<ChatHistoryEntry> = emptyList()
 )
 
-// Flat array deserialiser — used when /chat/history returns [] not {"exchanges":[]}
 typealias ChatHistoryList = List<ChatHistoryEntry>
 
 // ── Intents ───────────────────────────────────────────────────
@@ -125,7 +123,6 @@ data class IntentItem(
     val domain: String = "",
     val tier: String = "polars"
 ) {
-    // Derive chip label from id — replace underscores, capitalise
     val label: String get() = id
         .replace('_', ' ')
         .replaceFirstChar { it.uppercase() }
@@ -137,6 +134,7 @@ data class IntentsResponse(
 )
 
 // ── Offline pending ───────────────────────────────────────────
+
 @Serializable
 data class PendingOfflineItem(
     @SerialName("job_id")       val jobId: String,
@@ -173,6 +171,8 @@ data class Position(
     @SerialName("pnl_pct")   val pnlPct: Double = 0.0
 )
 
+// ── Portfolio Lens breakdown models ───────────────────────────
+
 @Serializable
 data class LensBreakdownItem(
     @SerialName("value_gbp")  val valueGbp: Double,
@@ -195,7 +195,6 @@ data class PiesResponse(
     @SerialName("total_cash_gbp")        val totalCashGbp: Double,
     @SerialName("fetched_at")            val fetchedAt: String = "",
     val pies: List<PieItem>              = emptyList(),
-    // ── New enriched breakdown blocks ─────────────────────────
     @SerialName("currency_breakdown")
     val currencyBreakdown: Map<String, LensBreakdownItem>?    = null,
     @SerialName("geography_breakdown")
@@ -220,12 +219,12 @@ data class PieItem(
     val status: String? = null,
     @SerialName("dividends_gained_gbp") val dividendsGainedGbp: Double = 0.0,
     val tickers: List<String>           = emptyList(),
-    // ── New enriched classification fields ────────────────────
-    @SerialName("asset_class")          val assetClass: String? = null,   // etf|trust|reit|commodity|mixed
-    @SerialName("income_type")          val incomeType: String? = null,   // covered_call|income|growth|commodity|mixed
-    val geography: String?              = null,                            // us|uk|global|em|mixed
-    val currency: String?               = null                             // GBP|USD|GBX
+    @SerialName("asset_class")          val assetClass: String? = null,
+    @SerialName("income_type")          val incomeType: String? = null,
+    val geography: String?              = null,
+    val currency: String?               = null
 )
+
 // ── DCA ───────────────────────────────────────────────────────
 
 @Serializable
@@ -260,7 +259,6 @@ data class DcaEffectiveness(
     val verdict: String = ""
 )
 
-// API returns monthly as a list — above_avg_qty is a boolean from VitaClaw
 @Serializable
 data class DcaMonthlyBuy(
     val month: String = "",
@@ -270,7 +268,6 @@ data class DcaMonthlyBuy(
     @SerialName("price_vs_prev")  val priceVsPrev: String = ""
 )
 
-// API returns price_distribution as a flat list of bucket objects
 @Serializable
 data class DcaPriceBucket(
     @SerialName("range_low")  val rangeLow: Double = 0.0,
@@ -299,7 +296,6 @@ data class DcaDividend(
     val payments: List<DcaDividendPayment> = emptyList()
 )
 
-// verdict is top-level — nullable until we confirm full shape
 @Serializable
 data class DcaVerdict(
     val rating: String = "",
@@ -360,10 +356,6 @@ data class ExDivAlert(
     @SerialName("is_alert") val isAlert: Boolean
 )
 
-// ── Buddie Insights (embedded in /brief structured) ───────────
-// API shape: { "finance": { "label": "Money", "observations": [...] }, ... }
-// Previous shape (whoop/t212/myenergi strings) was wrong — replaced entirely.
-
 @Serializable
 data class BuddieInsightObservation(
     val domain: String,
@@ -374,7 +366,7 @@ data class BuddieInsightObservation(
 
 @Serializable
 data class BuddieInsightDomain(
-    val label: String,                                          // "Money" | "Health" | "Energy"
+    val label: String,
     val observations: List<BuddieInsightObservation> = emptyList()
 )
 
@@ -384,8 +376,6 @@ data class BuddieInsights(
     val health:  BuddieInsightDomain? = null,
     val energy:  BuddieInsightDomain? = null
 )
-
-// ── Brief structured ──────────────────────────────────────────
 
 @Serializable
 data class BriefStructured(
@@ -412,7 +402,7 @@ data class BriefStructured(
 
 @Serializable
 data class BriefResponse(
-    val summary: String,                    // Telegram only — never render in VitaNest
+    val summary: String,
     @SerialName("last_updated") val lastUpdated: String,
     val structured: BriefStructured? = null
 )
@@ -509,13 +499,11 @@ data class EnergyResponse(
     @SerialName("last_updated")            val lastUpdated: String
 )
 
-// ── Buddie Observations (/buddie/observations/today) ──────────
-// domain_memory: cached per parent_domain — don't re-fetch per card.
-// v0 · 0 obs = new domain, render in muted grey.
+// ── Buddie Observations ───────────────────────────────────────
 
 @Serializable
 data class DomainMemory(
-    @SerialName("parent_domain")      val parentDomain: String,   // "finance" | "health" | "energy"
+    @SerialName("parent_domain")      val parentDomain: String,
     val version: Int = 0,
     @SerialName("total_observations") val totalObservations: Int = 0
 )
@@ -524,16 +512,15 @@ data class DomainMemory(
 data class ObservationItem(
     val id: Int,
     val domain: String,
-    val action: String,                                             // "OBSERVE: claim_id" — strip prefix for display
+    val action: String,
     val content: String,
     val confidence: Double,
-    @SerialName("confidence_calibrated") val confidenceCalibrated: Double? = null,  // null → show "—"
-    @SerialName("observation_type")      val observationType: String = "observation", // "observation" | "hypothesis"
+    @SerialName("confidence_calibrated") val confidenceCalibrated: Double? = null,
+    @SerialName("observation_type")      val observationType: String = "observation",
     val rating: String? = null,
     @SerialName("created_at")            val createdAt: String = "",
     @SerialName("domain_memory")         val domainMemory: DomainMemory? = null
 ) {
-    // Strip "OBSERVE: " prefix — display claim_id only
     val claimId: String get() = action.removePrefix("OBSERVE: ").trim()
 }
 
@@ -547,10 +534,7 @@ data class ObservationsResponse(
 @Serializable
 data class FeedbackRequest(val rating: String)
 
-// ── Growth (/growth) ──────────────────────────────────────────
-// Series fields are all nullable — new columns appear as VitaClaw adds them.
-// Never hardcode column positions — always access by key name.
-// date is "YYYY-MM-DD" string — sort as string (ISO format is safe).
+// ── Growth ────────────────────────────────────────────────────
 
 @Serializable
 data class GrowthSummary(
@@ -568,27 +552,22 @@ data class GrowthSummary(
 @Serializable
 data class GrowthSeries(
     val date: String,
-    // Portfolio
-    @SerialName("equity_gbp")              val equityGbp: Double? = null,
-    @SerialName("pnl_gbp")                val pnlGbp: Double? = null,
-    @SerialName("deposits_mtd")            val depositsMtd: Double? = null,
-    // Health
-    @SerialName("recovery_score")          val recoveryScore: Double? = null,
-    @SerialName("recovery_zone")           val recoveryZone: String? = null,  // "green"|"yellow"|"red"
-    @SerialName("hrv_ms")                  val hrvMs: Double? = null,
-    @SerialName("rhr_bpm")                 val rhrBpm: Double? = null,
-    @SerialName("spo2_pct")               val spo2Pct: Double? = null,       // null for older rows — skip in chart
-    // Energy
-    @SerialName("solar_kwh")              val solarKwh: Double? = null,
-    @SerialName("self_sufficiency_pct")   val selfSufficiencyPct: Double? = null,
-    @SerialName("energy_savings_gbp")     val energySavingsGbp: Double? = null,
-    // Income
-    @SerialName("income_mtd_gbp")         val incomeMtdGbp: Double? = null,
-    @SerialName("income_30d_gbp")         val income30dGbp: Double? = null,
+    @SerialName("equity_gbp")                val equityGbp: Double? = null,
+    @SerialName("pnl_gbp")                  val pnlGbp: Double? = null,
+    @SerialName("deposits_mtd")              val depositsMtd: Double? = null,
+    @SerialName("recovery_score")            val recoveryScore: Double? = null,
+    @SerialName("recovery_zone")             val recoveryZone: String? = null,
+    @SerialName("hrv_ms")                    val hrvMs: Double? = null,
+    @SerialName("rhr_bpm")                   val rhrBpm: Double? = null,
+    @SerialName("spo2_pct")                 val spo2Pct: Double? = null,
+    @SerialName("solar_kwh")                val solarKwh: Double? = null,
+    @SerialName("self_sufficiency_pct")     val selfSufficiencyPct: Double? = null,
+    @SerialName("energy_savings_gbp")       val energySavingsGbp: Double? = null,
+    @SerialName("income_mtd_gbp")           val incomeMtdGbp: Double? = null,
+    @SerialName("income_30d_gbp")           val income30dGbp: Double? = null,
     @SerialName("income_gap_to_target_gbp") val incomeGapToTargetGbp: Double? = null,
-    // Buddie
-    @SerialName("ghost_actions_total")    val ghostActionsTotal: Int? = null,
-    @SerialName("llm_cost_usd")           val llmCostUsd: Double? = null,
+    @SerialName("ghost_actions_total")      val ghostActionsTotal: Int? = null,
+    @SerialName("llm_cost_usd")             val llmCostUsd: Double? = null,
     @SerialName("calibrated_domains_count") val calibratedDomainsCount: Int? = null
 )
 
@@ -599,6 +578,56 @@ data class GrowthResponse(
     val to: String,
     val summary: GrowthSummary,
     val series: List<GrowthSeries> = emptyList()
+)
+
+// ── Income Stress ─────────────────────────────────────────────
+// POST /portfolio/income-stress
+// estimated:true in Phase 1 — always show badge, never hide.
+// income_change_pct can be positive (rate cut + positive shock) — not an error.
+
+@Serializable
+data class IncomeStressRequest(
+    val scenario:  String = "vol_collapse",
+    @SerialName("shock_pct") val shockPct: Double = -10.0
+)
+
+@Serializable
+data class IncomeStressCurrent(
+    @SerialName("total_value_gbp")    val totalValueGbp: Double,
+    @SerialName("monthly_income_gbp") val monthlyIncomeGbp: Double
+)
+
+@Serializable
+data class IncomeStressTypeResult(
+    @SerialName("weight_pct")           val weightPct: Double         = 0.0,
+    @SerialName("base_income_gbp")      val baseIncomeGbp: Double     = 0.0,
+    @SerialName("stressed_income_gbp")  val stressedIncomeGbp: Double = 0.0,
+    @SerialName("income_change_pct")    val incomeChangePct: Double    = 0.0,
+    @SerialName("base_value_gbp")       val baseValueGbp: Double      = 0.0,
+    @SerialName("stressed_value_gbp")   val stressedValueGbp: Double  = 0.0
+)
+
+@Serializable
+data class IncomeStressStressed(
+    @SerialName("total_value_gbp")    val totalValueGbp: Double,
+    @SerialName("monthly_income_gbp") val monthlyIncomeGbp: Double,
+    @SerialName("income_change_pct")  val incomeChangePct: Double,
+    @SerialName("income_floor_gbp")   val incomeFloorGbp: Double,
+    @SerialName("stability_score")    val stabilityScore: Int,
+    @SerialName("by_type")            val byType: Map<String, IncomeStressTypeResult> = emptyMap(),
+    @SerialName("key_insight")        val keyInsight: String = ""
+)
+
+@Serializable
+data class IncomeStressResponse(
+    val scenario:                    String,
+    @SerialName("scenario_label")   val scenarioLabel: String  = "",
+    @SerialName("shock_pct")        val shockPct: Double,
+    val estimated:                   Boolean                   = true,
+    val phase:                       Int                       = 1,
+    val current:                     IncomeStressCurrent,
+    val stressed:                    IncomeStressStressed,
+    @SerialName("calculated_at")    val calculatedAt: String   = ""
 )
 
 // ── Retrofit interface ────────────────────────────────────────
@@ -654,6 +683,11 @@ interface VitaClawApiService {
         @Query("days")    days: Int = 90,
         @Query("limit")   limit: Int = 50
     ): Response<OrdersSummaryResponse>
+
+    @POST("portfolio/income-stress")
+    suspend fun runIncomeStress(
+        @Body request: IncomeStressRequest
+    ): Response<IncomeStressResponse>
 
     @GET("brief")
     suspend fun getBrief(): Response<BriefResponse>
