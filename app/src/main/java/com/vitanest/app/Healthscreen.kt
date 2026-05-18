@@ -1,7 +1,8 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// HealthScreen — Whoop dashboard: recovery ring, metrics, sleep, workout, date nav ☘️
+// HealthScreen — Whoop dashboard: recovery ring, metrics, sleep, workout, date nav
+// Updated: analytics link row added below vitals ☘️
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -200,6 +201,13 @@ fun HealthScreen(
                     Spacer(Modifier.height(16.dp))
                     HealthSectionLabel("Vitals")
                     VitalsRow(data)
+                    Spacer(Modifier.height(16.dp))
+
+                    // ── Analytics link row ────────────────────────────────
+                    HorizontalDivider(color = LightRule, thickness = 0.5.dp,
+                        modifier = Modifier.padding(horizontal = 20.dp))
+                    Spacer(Modifier.height(12.dp))
+                    AnalyticsLinkRow(onClick = { navController.navigate("health_analytics") })
                     Spacer(Modifier.height(24.dp))
                 }
             }
@@ -212,6 +220,46 @@ fun HealthScreen(
             modifier      = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
+        )
+    }
+}
+
+// ── Analytics link row ────────────────────────────────────────
+
+@Composable
+private fun AnalyticsLinkRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(White)
+            .border(0.5.dp, LightRule, RoundedCornerShape(10.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "Health analytics",
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.Medium,
+                fontFamily = FontFamily.Serif,
+                color      = NearBlack
+            )
+            Text(
+                "SPO₂ trends · HRV · alert events",
+                fontSize   = 10.sp,
+                color      = MidGrey,
+                fontFamily = FontFamily.SansSerif
+            )
+        }
+        Icon(
+            imageVector        = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = "View analytics",
+            tint               = MidGrey,
+            modifier           = Modifier.size(16.dp)
         )
     }
 }

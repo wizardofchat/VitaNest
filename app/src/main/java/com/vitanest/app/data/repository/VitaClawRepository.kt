@@ -4,7 +4,8 @@ package com.vitanest.app.data.repository
 // VitaClawRepository — all API calls, single source of truth
 // Updated: getDcaDetail + getPortfolioOrders added;
 //          getTodayObservations + postObservationFeedback added;
-//          getGrowth added for /growth endpoint ☘️
+//          getGrowth added for /growth endpoint;
+//          getWhoopAnalytics + getWhoopSynthesis added for health analytics ☘️
 
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
@@ -20,6 +21,8 @@ import com.vitanest.app.data.remote.FeedbackRequest
 import com.vitanest.app.data.remote.GoalsResponse
 import com.vitanest.app.data.remote.GrowthResponse
 import com.vitanest.app.data.remote.HealthResponse
+import com.vitanest.app.data.remote.IncomeStressRequest
+import com.vitanest.app.data.remote.IncomeStressResponse
 import com.vitanest.app.data.remote.IntentsResponse
 import com.vitanest.app.data.remote.ObservationsResponse
 import com.vitanest.app.data.remote.OrdersSummaryResponse
@@ -29,8 +32,7 @@ import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.WhoopResponse
-import com.vitanest.app.data.remote.IncomeStressRequest
-import com.vitanest.app.data.remote.IncomeStressResponse
+import com.vitanest.app.data.remote.WhoopSynthesisResponse
 
 open class VitaClawRepository {
 
@@ -219,6 +221,7 @@ open class VitaClawRepository {
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
+
     // ── Brief ─────────────────────────────────────────────────
 
     open suspend fun getBrief(): Result<BriefResponse> {
@@ -241,6 +244,28 @@ open class VitaClawRepository {
                 val body = r.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /whoop"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getWhoopAnalytics(range: String): Result<WhoopResponse> {
+        return try {
+            val r = apiService.getWhoopAnalytics(range)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /whoop?range=$range"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getWhoopSynthesis(range: String): Result<WhoopSynthesisResponse> {
+        return try {
+            val r = apiService.getWhoopSynthesis(range)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /whoop/synthesis?range=$range"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
@@ -281,7 +306,6 @@ open class VitaClawRepository {
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /buddie/observations/today"))
             } else if (r.code() == 404) {
-                // No observations today — return empty, not an error
                 Result.success(ObservationsResponse(date = "", count = 0, observations = emptyList()))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
@@ -296,8 +320,6 @@ open class VitaClawRepository {
     }
 
     // ── Growth ───────────────────────────────────────────────
-    // days: rolling window (default 30); fromDate/toDate: explicit range (YYYY-MM-DD).
-    // Pass days only, or fromDate+toDate only — not both.
 
     open suspend fun getGrowth(
         days: Int? = 30,
@@ -305,8 +327,7 @@ open class VitaClawRepository {
         toDate: String? = null
     ): Result<GrowthResponse> {
         return try {
-            // If explicit date range provided, send that and suppress days param
-            val effectiveDays    = if (fromDate != null) null else days
+            val effectiveDays = if (fromDate != null) null else days
             val r = apiService.getGrowth(
                 days     = effectiveDays,
                 fromDate = fromDate,

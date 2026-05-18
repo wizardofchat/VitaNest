@@ -1,7 +1,7 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// MainActivity — all routes including portfolio_lens + income_stress ☘️
+// MainActivity — all routes including portfolio_lens + income_stress + health_analytics ☘️
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -99,6 +99,12 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("health_detail") {
                             HealthScreen(navController = navController, repository = vitaClawRepository)
+                        }
+                        composable("health_analytics") {
+                            HealthAnalyticsScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository
+                            )
                         }
                         composable("council") {
                             ComingSoonScreen(onBack = { navController.popBackStack() })
