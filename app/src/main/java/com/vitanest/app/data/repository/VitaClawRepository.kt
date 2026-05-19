@@ -5,7 +5,8 @@ package com.vitanest.app.data.repository
 // Updated: getDcaDetail + getPortfolioOrders added;
 //          getTodayObservations + postObservationFeedback added;
 //          getGrowth added for /growth endpoint;
-//          getWhoopAnalytics + getWhoopSynthesis added for health analytics ☘️
+//          getWhoopAnalytics + getWhoopSynthesis added for health analytics;
+//          getWhoopAnalytics now passes patterns=true via Retrofit default ☘️
 
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
@@ -248,13 +249,14 @@ open class VitaClawRepository {
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    // patterns=true is the Retrofit default — no extra param needed here
     open suspend fun getWhoopAnalytics(range: String): Result<WhoopResponse> {
         return try {
             val r = apiService.getWhoopAnalytics(range)
             if (r.isSuccessful) {
                 val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response from /whoop?range=$range"))
+                else Result.failure(Exception("Empty response from /whoop?range=$range&patterns=true"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }

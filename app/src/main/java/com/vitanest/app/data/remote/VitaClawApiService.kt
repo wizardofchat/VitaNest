@@ -5,7 +5,10 @@ package com.vitanest.app.data.remote
 // Updated: BuddieInsights model fixed (new domain-keyed shape);
 //          ObservationItem + DomainMemory updated (confidence_calibrated,
 //          observation_type, domain_memory); GrowthResponse + GrowthSeries
-//          added for /growth endpoint ☘️
+//          added for /growth endpoint;
+//          WhoopPatterns + timeline/detected/correlations models added
+//          for /whoop?patterns=true — extends WhoopResponse with nullable
+//          patterns field; getWhoopAnalytics updated to pass patterns=true ☘️
 
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -456,7 +459,9 @@ data class WhoopResponse(
     @SerialName("baselines")          val baselines:  WhoopBaselines?       = null,
     @SerialName("alerts")             val alerts:     List<WhoopAlert>      = emptyList(),
     @SerialName("thresholds")         val thresholds: WhoopThresholds?      = null,
-    @SerialName("range")              val range:      String?               = null
+    @SerialName("range")              val range:      String?               = null,
+    // ── Patterns — null unless patterns=true passed ────────────
+    @SerialName("patterns")           val patterns:   WhoopPatterns?        = null
 )
 
 // ── Whoop analytics (GET /whoop?range=) ──────────────────────
@@ -514,8 +519,6 @@ object WhoopAlertSerializer : KSerializer<WhoopAlert> {
         buildClassSerialDescriptor("WhoopAlert")
 
     override fun serialize(encoder: Encoder, value: WhoopAlert) {
-        // Called when HomeViewModel caches WhoopResponse to DataStore.
-        // Write a plain JSON object so round-trip works.
         val jsonEncoder = encoder as? kotlinx.serialization.json.JsonEncoder
             ?: throw SerializationException("WhoopAlert requires JsonEncoder")
         val obj = kotlinx.serialization.json.buildJsonObject {
@@ -564,6 +567,76 @@ data class WhoopSynthesisResponse(
     @SerialName("synthesis")   val synthesis:  String,
     @SerialName("data_points") val dataPoints: Int,
     @SerialName("cost_usd")    val costUsd:    Double
+)
+
+// ── Whoop Patterns (GET /whoop?patterns=true&range=) ──────────
+// Extends WhoopResponse — null unless patterns=true is passed.
+// timeline: one entry per day in the window.
+// detected: cross-day pattern signals, ordered by severity.
+// correlations: always 30d window regardless of range toggle.
+// health_state: derived status summary — null if not enough data.
+
+@Serializable
+data class WhoopHealthState(
+    @SerialName("status") val status: String,   // "green" | "suppressed" | "warning" | "critical"
+    @SerialName("label")  val label:  String,   // "Recovery suppressed"
+    @SerialName("reason") val reason: String,   // one-line explanation
+    @SerialName("zone")   val zone:   String    // "green" | "amber" | "red"
+)
+
+@Serializable
+data class WhoopPatterns(
+    @SerialName("window_days")   val windowDays:   Int,
+    @SerialName("timeline")      val timeline:     List<WhoopTimelineDay>,
+    @SerialName("detected")      val detected:     List<WhoopDetectedPattern>,
+    @SerialName("correlations")  val correlations: WhoopCorrelations,
+    @SerialName("health_state")  val healthState:  WhoopHealthState? = null
+)
+
+@Serializable
+data class WhoopTimelineDay(
+    @SerialName("date")     val date:    String,
+    @SerialName("recovery") val recovery: WhoopZoneValue? = null,
+    @SerialName("hrv_ms")   val hrvMs:   WhoopZoneValue? = null,
+    @SerialName("rhr_bpm")  val rhrBpm:  WhoopZoneValue? = null,
+    @SerialName("spo2_pct") val spo2Pct: WhoopZoneValue? = null,
+    @SerialName("strain")   val strain:  WhoopZoneValue? = null,
+    @SerialName("workout")  val workout: WhoopWorkout?   = null
+)
+
+@Serializable
+data class WhoopZoneValue(
+    @SerialName("value") val value: Double,
+    @SerialName("zone")  val zone:  String   // "green" | "amber" | "red"
+)
+
+@Serializable
+data class WhoopWorkout(
+    @SerialName("activity")    val activity:   String?  = null,
+    @SerialName("emoji")       val emoji:      String?  = null,
+    @SerialName("zone45_pct")  val zone45Pct:  Int?     = null,
+    @SerialName("strain")      val strain:     Double?  = null,
+    @SerialName("trigger")     val trigger:    Boolean  = false,
+    @SerialName("overreach")   val overreach:  Boolean  = false,
+    @SerialName("collapse")    val collapse:   Boolean  = false
+)
+
+@Serializable
+data class WhoopDetectedPattern(
+    @SerialName("pattern")    val pattern:   String,
+    @SerialName("severity")   val severity:  String,            // "critical" | "warning"
+    @SerialName("date_start") val dateStart: String? = null,    // multi-day patterns
+    @SerialName("date_end")   val dateEnd:   String? = null,
+    @SerialName("date")       val date:      String? = null,    // single-day patterns
+    @SerialName("evidence")   val evidence:  String
+)
+
+@Serializable
+data class WhoopCorrelations(
+    @SerialName("window_days")              val windowDays:             Int,
+    @SerialName("spo2_vs_rhr")              val spo2VsRhr:              Double,
+    @SerialName("hrv_vs_recovery")          val hrvVsRecovery:          Double,
+    @SerialName("strain_vs_recovery_lag1")  val strainVsRecoveryLag1:   Double
 )
 
 // ── Dividends ─────────────────────────────────────────────────
@@ -860,9 +933,12 @@ interface VitaClawApiService {
         @Body body: FeedbackRequest
     ): Response<Unit>
 
+    // patterns=true — fetches timeline, detected patterns, correlations
+    // Always pass patterns=true from HealthAnalyticsScreen
     @GET("whoop")
     suspend fun getWhoopAnalytics(
-        @Query("range") range: String
+        @Query("range")    range:    String,
+        @Query("patterns") patterns: Boolean = true
     ): Response<WhoopResponse>
 
     @GET("whoop/synthesis")
