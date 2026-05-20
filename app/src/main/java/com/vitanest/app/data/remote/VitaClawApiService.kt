@@ -851,6 +851,90 @@ data class IncomeStressResponse(
     @SerialName("calculated_at")   val calculatedAt: String   = ""
 )
 
+
+// ── Finance Analytics (/finance/analytics?range=) ─────────────
+// Nullable series fields — gaps in snapshot data render as empty, never 0.
+// alerts reuse WhoopAlert model — same shape confirmed from API.
+// ok severity alerts suppressed in VitaNest — warnings/criticals only.
+
+@Serializable
+data class FinanceAnalyticsSeries(
+    @SerialName("dates")          val dates:        List<String>,
+    @SerialName("equity_gbp")     val equityGbp:    List<Double?>,
+    @SerialName("pnl_gbp")        val pnlGbp:       List<Double?>,
+    @SerialName("income_30d_gbp") val income30dGbp: List<Double?>,
+    @SerialName("deposits_mtd")   val depositsMtd:  List<Double?>
+)
+
+@Serializable
+data class FinanceAnalyticsThresholds(
+    @SerialName("income_target_gbp")    val incomeTargetGbp:   Double,
+    @SerialName("pnl_warning_drop_gbp") val pnlWarningDropGbp: Double
+)
+
+
+// ── Finance Patterns (embedded in FinanceAnalyticsResponse) ───
+// Returned when VitaClaw computes patterns block.
+// correlations shape differs from Whoop — finance-specific fields.
+// min_data_points_met guards against rendering weak correlations.
+
+@Serializable
+data class FinanceCorrelations(
+    @SerialName("window_days")            val windowDays:           Int,
+    @SerialName("deposits_vs_income")     val depositsVsIncome:     Double?  = null,
+    @SerialName("income_consistency")     val incomeConsistency:    Double?  = null,
+    @SerialName("min_data_points_met")    val minDataPointsMet:     Map<String, Boolean> = emptyMap(),
+    @SerialName("data_points")            val dataPoints:           Map<String, Int>     = emptyMap()
+)
+
+@Serializable
+data class FinanceHealthState(
+    @SerialName("status") val status: String,   // "green" | "warning" | "critical"
+    @SerialName("label")  val label:  String,
+    @SerialName("reason") val reason: String,
+    @SerialName("zone")   val zone:   String    // "green" | "amber" | "red"
+)
+
+@Serializable
+data class FinanceDetectedPattern(
+    @SerialName("pattern")  val pattern:  String,
+    @SerialName("severity") val severity: String,   // "critical" | "warning"
+    @SerialName("evidence") val evidence: String
+)
+
+@Serializable
+data class FinancePatterns(
+    @SerialName("health_state")  val healthState:  FinanceHealthState?       = null,
+    @SerialName("correlations")  val correlations: FinanceCorrelations?       = null,
+    @SerialName("detected")      val detected:     List<FinanceDetectedPattern> = emptyList()
+)
+
+@Serializable
+data class FinanceAnalyticsResponse(
+    @SerialName("equity_gbp")        val equityGbp:       Double,
+    @SerialName("pnl_gbp")           val pnlGbp:          Double,
+    @SerialName("income_30d_gbp")    val income30dGbp:    Double,
+    @SerialName("income_target_gbp") val incomeTargetGbp: Double,
+    @SerialName("income_gap_gbp")    val incomeGapGbp:    Double,
+    @SerialName("series")            val series:          FinanceAnalyticsSeries?,
+    @SerialName("alerts")            val alerts:          List<WhoopAlert>         = emptyList(),
+    @SerialName("thresholds")        val thresholds:      FinanceAnalyticsThresholds?,
+    @SerialName("range")             val range:           String?                  = null,
+    @SerialName("patterns")          val patterns:        FinancePatterns?         = null
+)
+
+// Finance synthesis reuses same shape as WhoopSynthesisResponse.
+// Confirmed from curl: range, synthesis, data_points, cost_usd, generated_at.
+
+@Serializable
+data class FinanceSynthesisResponse(
+    @SerialName("range")        val range:       String,
+    @SerialName("synthesis")    val synthesis:   String,
+    @SerialName("data_points")  val dataPoints:  Int,
+    @SerialName("cost_usd")     val costUsd:     Double,
+    @SerialName("generated_at") val generatedAt: String = ""
+)
+
 // ── Retrofit interface ────────────────────────────────────────
 
 interface VitaClawApiService {
@@ -952,4 +1036,15 @@ interface VitaClawApiService {
         @Query("from_date") fromDate: String? = null,
         @Query("to_date")   toDate: String? = null
     ): Response<GrowthResponse>
+    @GET("finance/analytics")
+    suspend fun getFinanceAnalytics(
+        @Query("range") range: String
+    ): Response<FinanceAnalyticsResponse>
+
+    @GET("finance/synthesis")
+    suspend fun getFinanceSynthesis(
+        @Query("range") range: String
+    ): Response<FinanceSynthesisResponse>
+
+
 }

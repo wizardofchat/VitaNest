@@ -148,6 +148,7 @@ fun PortfolioLensScreen(
     }
 }
 
+
 // ── Fixed header + slice chips ────────────────────────────────
 
 @Composable

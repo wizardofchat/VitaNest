@@ -206,7 +206,8 @@ fun GrowthScreen(
                         activeTab       = activeTab,
                         days            = days,
                         selectedColumns = selectedColumns[activeTab] ?: mutableListOf(),
-                        onColumnsChange = { selectedColumns[activeTab] = it.toMutableList() }
+                        onColumnsChange = { selectedColumns[activeTab] = it.toMutableList() },
+                        onAnalyticsNav  = { route -> navController.navigate(route) }
                     )
                 }
                 else -> {
@@ -303,7 +304,8 @@ private fun GrowthTabContent(
     activeTab: String,
     days: Int,
     selectedColumns: List<String>,
-    onColumnsChange: (List<String>) -> Unit
+    onColumnsChange: (List<String>) -> Unit,
+    onAnalyticsNav: (String) -> Unit = {}
 ) {
     val context   = LocalContext.current
     val allSeries = growth.series.sortedBy { it.date }
@@ -377,6 +379,30 @@ private fun GrowthTabContent(
                     onReset          = { pickerDraft = (DEFAULT_COLUMNS[activeTab] ?: emptyList()).toMutableList() }
                 )
                 HorizontalDivider(color = LightRule, thickness = 0.5.dp)
+            }
+
+            // ── Analytics deep-dive link — top of tab ──────────
+            if (activeTab == "portfolio") {
+                Spacer(Modifier.height(12.dp))
+                GrowthAnalyticsLinkRow(
+                    label    = "Finance analytics",
+                    subtitle = "Equity · P&L · Income trends",
+                    onClick  = { onAnalyticsNav("finance_analytics") }
+                )
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(color = LightRule, thickness = 0.5.dp,
+                    modifier = Modifier.padding(horizontal = 16.dp))
+            }
+            if (activeTab == "energy") {
+                Spacer(Modifier.height(12.dp))
+                GrowthAnalyticsLinkRow(
+                    label    = "Energy analytics",
+                    subtitle = "Solar · Self-sufficiency · EV trends",
+                    onClick  = { onAnalyticsNav("energy_analytics") }
+                )
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(color = LightRule, thickness = 0.5.dp,
+                    modifier = Modifier.padding(horizontal = 16.dp))
             }
 
             SummaryCards(growth = growth, activeTab = activeTab)
@@ -874,6 +900,51 @@ private fun formatDouble(key: String, v: Double): String = when {
     key.contains("ms")   -> "${"%.0f".format(v)}"
     key.contains("bpm")  -> "${"%.0f".format(v)}"
     else                 -> "${"%.1f".format(v)}"
+}
+
+
+// ── Growth analytics link row ─────────────────────────────────
+// Light theme — matches GrowthScreen palette.
+// Tab-conditional — portfolio tab → finance_analytics,
+//                   energy tab    → energy_analytics.
+
+@Composable
+private fun GrowthAnalyticsLinkRow(
+    label:    String,
+    subtitle: String,
+    onClick:  () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(White)
+            .border(0.5.dp, LightRule, RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text       = label,
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color      = NearBlack
+            )
+            Text(
+                text     = subtitle,
+                fontSize = 10.sp,
+                color    = MidGrey
+            )
+        }
+        Text(
+            text     = "›",
+            fontSize = 18.sp,
+            color    = NearBlack.copy(alpha = 0.4f)
+        )
+    }
 }
 
 @Composable

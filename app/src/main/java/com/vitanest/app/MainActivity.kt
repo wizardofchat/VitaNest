@@ -106,6 +106,12 @@ class MainActivity : ComponentActivity() {
                                 repository    = vitaClawRepository
                             )
                         }
+                        composable("finance_analytics") {
+                            FinanceAnalyticsScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository
+                            )
+                        }
                         composable("council") {
                             ComingSoonScreen(onBack = { navController.popBackStack() })
                         }

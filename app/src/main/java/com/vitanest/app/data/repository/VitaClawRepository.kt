@@ -33,6 +33,8 @@ import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.WhoopResponse
+import com.vitanest.app.data.remote.FinanceAnalyticsResponse
+import com.vitanest.app.data.remote.FinanceSynthesisResponse
 import com.vitanest.app.data.remote.WhoopSynthesisResponse
 
 open class VitaClawRepository {
@@ -342,4 +344,28 @@ open class VitaClawRepository {
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
+    // ── Finance Analytics ─────────────────────────────────────
+
+    open suspend fun getFinanceAnalytics(range: String): Result<FinanceAnalyticsResponse> {
+        return try {
+            val r = apiService.getFinanceAnalytics(range)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /finance/analytics?range=$range"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getFinanceSynthesis(range: String): Result<FinanceSynthesisResponse> {
+        return try {
+            val r = apiService.getFinanceSynthesis(range)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /finance/synthesis?range=$range"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
 }

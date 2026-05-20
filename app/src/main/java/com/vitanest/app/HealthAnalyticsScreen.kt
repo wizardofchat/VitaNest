@@ -7,7 +7,11 @@ package com.vitanest.app
 // Updated: range toggle 7d/14d/All (7d default); pattern heatmap, detected
 // patterns, and 30-day correlations inserted between alerts and baselines. ☘️
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
@@ -899,6 +903,7 @@ private fun DarkInsightSection(
     synError:   String?,
     onRequest:  () -> Unit
 ) {
+    val context = LocalContext.current
     Column(modifier = Modifier.padding(horizontal = 20.dp)) {
         if (synthesis == null && !synLoading) {
             Box(
@@ -957,6 +962,34 @@ private fun DarkInsightSection(
                 Spacer(Modifier.height(8.dp))
                 Text("${syn.dataPoints} data points",
                     fontSize = 9.sp, color = DarkMuted, fontFamily = FontFamily.SansSerif)
+                Spacer(Modifier.height(10.dp))
+                var copied by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AmberBorderD)
+                        .clickable {
+                            copyHealthInsight(context, syn.synthesis, syn.range, syn.dataPoints)
+                            copied = true
+                        }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (copied) "✓ Copied" else "⎘ Copy insight",
+                        fontSize   = 10.sp,
+                        color      = AmberTextD,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = FontFamily.SansSerif
+                    )
+                }
+                LaunchedEffect(copied) {
+                    if (copied) {
+                        kotlinx.coroutines.delay(2000)
+                        copied = false
+                    }
+                }
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -1117,6 +1150,29 @@ private fun DarkHealthIntelligenceTile(patterns: WhoopPatterns) {
             }
         }
     }
+}
+
+
+// ── Copy health insight to clipboard ─────────────────────────
+
+private fun copyHealthInsight(
+    context:    Context,
+    synthesis:  String,
+    range:      String,
+    dataPoints: Int
+) {
+    val text = buildString {
+        appendLine("Buddie Health Insight · $range")
+        appendLine("$dataPoints data points")
+        appendLine()
+        appendLine(synthesis
+            .replace(Regex("#{1,6}\\s*"), "")
+            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+            .replace(Regex("\\*(.+?)\\*"), "$1")
+            .trim())
+    }
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("Buddie Health Insight", text))
 }
 
 // ── Helpers ───────────────────────────────────────────────────

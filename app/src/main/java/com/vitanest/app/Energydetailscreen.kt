@@ -8,6 +8,9 @@ package com.vitanest.app
 // Updated: InkBottomNav added 2026-05-12
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -121,6 +124,14 @@ fun EnergyDetailScreen(
                     StaleWarning(d.lastUpdated)
                     Spacer(modifier = Modifier.height(12.dp))
                 }
+            }
+
+            // ── Energy Analytics link ─────────────────────────────
+            item {
+                EnergyAnalyticsLinkRow(
+                    onClick = { navController.navigate("energy_analytics") }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             // ─────────────────────────────────────────────────────
@@ -413,6 +424,40 @@ private val ISO_FORMAT = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.UK)
 
 private fun parseIso(ts: String): Date? =
     try { ISO_FORMAT.parse(ts) } catch (e: Exception) { null }
+
+
+// ── Energy analytics link row ─────────────────────────────────
+// Light theme — matches EnergyDetailScreen palette.
+
+@Composable
+private fun EnergyAnalyticsLinkRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White)
+            .border(0.5.dp, Color(0xFFDDDDDD), RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        androidx.compose.foundation.layout.Column {
+            Text(
+                text       = "Energy analytics",
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color      = T.Ink
+            )
+            Text(
+                text     = "Solar · Self-sufficiency · EV trends",
+                fontSize = 10.sp,
+                color    = T.Muted
+            )
+        }
+        Text(text = "›", fontSize = 18.sp, color = T.Ink.copy(alpha = 0.4f))
+    }
+}
 
 private fun isDataStale(lastUpdated: String): Boolean =
     try {
