@@ -410,7 +410,7 @@ private fun TurbineCanvas(
             drawCircle(color = T.Paper, radius = innerCircR, center = centre)
         }
 
-        val bladeNavRoutes = listOf("energy", "portfolio_detail", "health_detail")
+        val bladeNavRoutes = listOf("energy", "finance_analytics", "health_detail")
         BLADE_ANGLES.forEachIndexed { i, (_, angleDeg, _) ->
             val radians = Math.toRadians(angleDeg.toDouble())
             val midR    = (INNER_RADIUS_DP + OUTER_RADIUS_DP) / 2f
