@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("ask") {
                             buddieViewModel.initialise(cachedBrief = cachedBrief)
-                            AskScreen(navController = navController, viewModel = buddieViewModel)
+                            AskScreen(navController = navController, viewModel = buddieViewModel, repository = vitaClawRepository)
                         }
                         composable("energy") {
                             EnergyDetailScreen(navController = navController, repository = vitaClawRepository)

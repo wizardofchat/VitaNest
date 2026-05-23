@@ -935,6 +935,39 @@ data class FinanceSynthesisResponse(
     @SerialName("generated_at") val generatedAt: String = ""
 )
 
+
+// ── Paper Trade (/buddie/paper-trade) ─────────────────────────
+// Read-only. No auth. Refreshes monthly automatically.
+// Run Now: POST /buddie/paper-trade/run → re-fetches GET after success.
+
+@Serializable
+data class PaperTradeSelection(
+    @SerialName("ticker")                val ticker:              String,
+    @SerialName("shares")                val shares:              Double,
+    @SerialName("price_gbp")             val priceGbp:            Double,
+    @SerialName("capital_gbp")           val capitalGbp:          Double,
+    @SerialName("projected_income_gbp")  val projectedIncomeGbp:  Double,
+    @SerialName("ex_div_date")           val exDivDate:           String,
+    @SerialName("payment_date")          val paymentDate:         String,
+    @SerialName("rationale")             val rationale:           String,
+    @SerialName("status")                val status:              String
+)
+
+@Serializable
+data class PaperTradeResponse(
+    @SerialName("month")              val month:           String,
+    @SerialName("count")              val count:           Int,
+    @SerialName("total_capital_gbp")  val totalCapitalGbp: Double,
+    @SerialName("total_income_gbp")   val totalIncomeGbp:  Double,
+    @SerialName("selections")         val selections:      List<PaperTradeSelection> = emptyList()
+)
+
+@Serializable
+data class PaperTradeRunResponse(
+    @SerialName("status") val status: String,
+    @SerialName("output") val output: String = ""
+)
+
 // ── Retrofit interface ────────────────────────────────────────
 
 interface VitaClawApiService {
@@ -1045,6 +1078,13 @@ interface VitaClawApiService {
     suspend fun getFinanceSynthesis(
         @Query("range") range: String
     ): Response<FinanceSynthesisResponse>
+
+
+    @GET("buddie/paper-trade/latest")
+    suspend fun getPaperTrade(): Response<PaperTradeResponse>
+
+    @POST("buddie/paper-trade/run")
+    suspend fun runPaperTrade(): Response<PaperTradeRunResponse>
 
 
 }

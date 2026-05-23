@@ -35,6 +35,8 @@ import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.WhoopResponse
 import com.vitanest.app.data.remote.FinanceAnalyticsResponse
 import com.vitanest.app.data.remote.FinanceSynthesisResponse
+import com.vitanest.app.data.remote.PaperTradeResponse
+import com.vitanest.app.data.remote.PaperTradeRunResponse
 import com.vitanest.app.data.remote.WhoopSynthesisResponse
 
 open class VitaClawRepository {
@@ -365,6 +367,30 @@ open class VitaClawRepository {
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /finance/synthesis?range=$range"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Paper Trade ──────────────────────────────────────────
+
+    open suspend fun getPaperTrade(): Result<PaperTradeResponse> {
+        return try {
+            val r = apiService.getPaperTrade()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /buddie/paper-trade/latest"))
+            } else Result.failure(Exception("HTTP \${r.code()}: \${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun runPaperTrade(): Result<PaperTradeRunResponse> {
+        return try {
+            val r = apiService.runPaperTrade()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /buddie/paper-trade/run"))
+            } else Result.failure(Exception("HTTP \${r.code()}: \${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
 
