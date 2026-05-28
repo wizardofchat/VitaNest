@@ -2,8 +2,9 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // BuddieTradeScreen — dedicated Trade tab
-// Sections: Budget → Active Trades (feedback stubs) → Candidates → Excluded
-// Feedback endpoints not yet live — Bought/Skipped buttons disabled until tomorrow ☘️
+// Sections: Budget → Active Trades (with feedback) → Candidates → Excluded
+// Feedback: Bought/Skipped POST /buddie/trades/{id}/feedback?action=executed|skipped
+// Status logic: active+window open → buttons · executed/skipped → badge · window closed → muted text ☘️
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -15,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -213,7 +215,7 @@ fun BuddieTradeScreen(
                                     )
                                 }
                                 items(active) { trade ->
-                                    ActiveTradeCard(trade = trade)
+                                    ActiveTradeCard(trade = trade, repository = repository)
                                     HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
                                 }
                             }
@@ -384,8 +386,24 @@ private fun TradeSectionHeader(label: String, count: Int, meta: String? = null) 
 
 // ── Active trade card ─────────────────────────────────────────
 
+
 @Composable
-private fun ActiveTradeCard(trade: BuddieTradeItem) {
+private fun ActiveTradeCard(
+    trade:      BuddieTradeItem,
+    repository: VitaClawRepository
+) {
+    var cardStatus by remember(trade.id) { mutableStateOf(trade.status) }
+    var isPosting  by remember { mutableStateOf(false) }
+    var postError  by remember { mutableStateOf<String?>(null) }
+    val scope      = rememberCoroutineScope()
+
+    val windowOpen = remember(trade.expiresAt) {
+        try {
+            !LocalDate.parse(trade.expiresAt, DateTimeFormatter.ISO_LOCAL_DATE)
+                .isBefore(LocalDate.now())
+        } catch (_: Exception) { true }
+    }
+
     val daysToExDiv = daysUntilTrade(trade.exDivDate)
     val (exDivBg, exDivFg) = when {
         daysToExDiv <= 3L  -> Pair(TradeRedBg,   TradeRedFg)
@@ -393,34 +411,73 @@ private fun ActiveTradeCard(trade: BuddieTradeItem) {
         else               -> Pair(TradeMutedBg, T.Muted)
     }
 
+    fun postFeedback(action: String) {
+        scope.launch {
+            isPosting = true
+            postError = null
+            repository.postTradeFeedback(id = trade.id, action = action)
+                .fold(
+                    onSuccess = { response -> cardStatus = response.status },
+                    onFailure = { err ->
+                        postError = when (err.message) {
+                            "window_closed"    -> "window_closed"
+                            "already_recorded" -> "already_recorded"
+                            else               -> err.message
+                        }
+                    }
+                )
+            isPosting = false
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = T.screenPadding, vertical = 12.dp)
     ) {
-        // Ticker + status
+        // Ticker + status badge
         Row(
             modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically
         ) {
             Text(
-                text      = trade.ticker,
-                fontSize  = 17.sp,
+                text       = trade.ticker,
+                fontSize   = 17.sp,
                 fontWeight = FontWeight.Medium,
-                color     = T.Ink
+                color      = T.Ink
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(
+            when (cardStatus) {
+                "executed" -> Box(
                     modifier = Modifier
                         .background(TradeGreenBg, RoundedCornerShape(10.dp))
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text      = trade.status,
-                        fontSize  = 10.sp,
+                        text       = "Executed \u2713",
+                        fontSize   = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color     = TradeGreenFg
+                        color      = TradeGreenFg
+                    )
+                }
+                "skipped" -> Box(
+                    modifier = Modifier
+                        .background(TradeMutedBg, RoundedCornerShape(10.dp))
+                        .border(0.5.dp, T.Rule, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(text = "Skipped", fontSize = 10.sp, color = T.Muted)
+                }
+                else -> Box(
+                    modifier = Modifier
+                        .background(TradeGreenBg, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text       = "active",
+                        fontSize   = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color      = TradeGreenFg
                     )
                 }
             }
@@ -444,74 +501,100 @@ private fun ActiveTradeCard(trade: BuddieTradeItem) {
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text      = "${daysToExDiv}d",
-                    fontSize  = 10.sp,
+                    text       = "${daysToExDiv}d",
+                    fontSize   = 10.sp,
                     fontWeight = FontWeight.Medium,
-                    color     = exDivFg
+                    color      = exDivFg
                 )
             }
         }
 
         Spacer(Modifier.height(6.dp))
 
-        // Trade details
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("${trade.shares.toInt()} shares @ £${"%.2f".format(trade.priceGbp)}",
+            Text("${trade.shares.toInt()} shares @ \u00a3${"%.2f".format(trade.priceGbp)}",
                 fontSize = 12.sp, color = T.Muted)
-            Text("·", fontSize = 12.sp, color = T.Muted)
-            Text("Capital: £${"%.2f".format(trade.capitalGbp)}",
+            Text("\u00b7", fontSize = 12.sp, color = T.Muted)
+            Text("Capital: \u00a3${"%.2f".format(trade.capitalGbp)}",
                 fontSize = 12.sp, fontWeight = FontWeight.Medium, color = T.Ink)
         }
-
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Income:", fontSize = 12.sp, color = T.Muted)
-            Text("£${"%.2f".format(trade.projectedIncomeGbp)}",
+            Text("\u00a3${"%.2f".format(trade.projectedIncomeGbp)}",
                 fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TradeGreen)
-            Text("· pays ${formatTradeDateShort(trade.paymentDate)}",
+            Text("\u00b7 pays ${formatTradeDateShort(trade.paymentDate)}",
                 fontSize = 12.sp, color = T.Muted)
         }
 
         Spacer(Modifier.height(10.dp))
 
-        // Ghost notice + disabled feedback buttons
+        // Bottom row — ghost notice + action controls
         Row(
             modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically
         ) {
             Text(
-                text      = "Paper trade — not executed",
+                text      = "Paper trade \u2014 not executed",
                 fontSize  = 10.sp,
                 color     = T.Muted,
                 fontStyle = FontStyle.Italic
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Bought — disabled stub (endpoint not yet live)
-                OutlinedButton(
-                    onClick        = { /* TODO: POST /buddie/trades/{id}/feedback */ },
-                    enabled        = false,
-                    shape          = RoundedCornerShape(4.dp),
-                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    modifier       = Modifier.height(28.dp)
-                ) {
-                    Text("Bought", fontSize = 10.sp)
+            when {
+                cardStatus == "executed" || cardStatus == "skipped" -> { }
+                !windowOpen || postError == "window_closed" -> {
+                    Text(
+                        text      = "Window closed \u2014 ex-div passed",
+                        fontSize  = 10.sp,
+                        color     = T.Muted,
+                        fontStyle = FontStyle.Italic
+                    )
                 }
-                // Skipped — disabled stub (endpoint not yet live)
-                OutlinedButton(
-                    onClick        = { /* TODO: POST /buddie/trades/{id}/feedback */ },
-                    enabled        = false,
-                    shape          = RoundedCornerShape(4.dp),
-                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    modifier       = Modifier.height(28.dp)
-                ) {
-                    Text("Skipped", fontSize = 10.sp)
+                postError == "already_recorded" -> {
+                    Text(
+                        text     = "Already recorded",
+                        fontSize = 10.sp,
+                        color    = T.Muted,
+                        fontStyle = FontStyle.Italic
+                    )
+                }
+                else -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick        = { postFeedback("executed") },
+                            enabled        = !isPosting,
+                            shape          = RoundedCornerShape(4.dp),
+                            border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                            modifier       = Modifier.height(28.dp)
+                        ) {
+                            if (isPosting) {
+                                CircularProgressIndicator(
+                                    modifier    = Modifier.size(10.dp),
+                                    strokeWidth = 1.5.dp,
+                                    color       = T.Muted
+                                )
+                            } else {
+                                Text("Bought", fontSize = 10.sp)
+                            }
+                        }
+                        OutlinedButton(
+                            onClick        = { postFeedback("skipped") },
+                            enabled        = !isPosting,
+                            shape          = RoundedCornerShape(4.dp),
+                            border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                            modifier       = Modifier.height(28.dp)
+                        ) {
+                            Text("Skipped", fontSize = 10.sp)
+                        }
+                    }
                 }
             }
         }
     }
 }
+
 
 // ── Past trades (collapsed) ───────────────────────────────────
 

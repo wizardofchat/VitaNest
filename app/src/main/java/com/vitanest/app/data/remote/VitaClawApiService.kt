@@ -1144,4 +1144,23 @@ interface VitaClawApiService {
     @GET("buddie/candidates")
     suspend fun getBuddieCandidates(): Response<BuddieCandidatesResponse>
 
+    @POST("buddie/trades/{id}/feedback")
+    suspend fun postTradeFeedback(
+        @Path("id")      id:     Int,
+        @Query("action") action: String   // "executed" | "skipped"
+    ): Response<TradeFeedbackResponse>
+
 }
+
+// ── Trade feedback response ───────────────────────────────────
+// Returned on 200 from POST /buddie/trades/{id}/feedback
+// status field used to update card locally — no full list refresh needed
+
+@Serializable
+data class TradeFeedbackResponse(
+    val id:                             Int,
+    val ticker:                         String,
+    val status:                         String,   // "executed" | "skipped"
+    val message:                        String,
+    @SerialName("projected_income_gbp") val projectedIncomeGbp: Double
+)

@@ -15,6 +15,7 @@ import com.vitanest.app.data.remote.AskResponse
 import com.vitanest.app.data.remote.BriefResponse
 import com.vitanest.app.data.remote.BuddieBudgetResponse
 import com.vitanest.app.data.remote.BuddieCandidatesResponse
+import com.vitanest.app.data.remote.TradeFeedbackResponse
 import com.vitanest.app.data.remote.BuddieTradesResponse
 import com.vitanest.app.data.remote.ChatHistoryResponse
 import com.vitanest.app.data.remote.ChatOpeningResponse
@@ -407,6 +408,29 @@ open class VitaClawRepository {
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /buddie/candidates"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // action = "executed" | "skipped"
+    // 200 → Result.success(TradeFeedbackResponse)
+    // 403 → Result.failure("window_closed")
+    // 409 → Result.failure("already_recorded")
+    open suspend fun postTradeFeedback(
+        id:     Int,
+        action: String
+    ): Result<TradeFeedbackResponse> {
+        return try {
+            val r = apiService.postTradeFeedback(id = id, action = action)
+            when (r.code()) {
+                200  -> {
+                    val body = r.body()
+                    if (body != null) Result.success(body)
+                    else Result.failure(Exception("Empty response from /buddie/trades/$id/feedback"))
+                }
+                403  -> Result.failure(Exception("window_closed"))
+                409  -> Result.failure(Exception("already_recorded"))
+                else -> Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+            }
         } catch (e: Exception) { Result.failure(e) }
     }
 }
