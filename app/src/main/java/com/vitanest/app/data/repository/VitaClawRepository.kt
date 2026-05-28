@@ -6,11 +6,16 @@ package com.vitanest.app.data.repository
 //          getTodayObservations + postObservationFeedback added;
 //          getGrowth added for /growth endpoint;
 //          getWhoopAnalytics + getWhoopSynthesis added for health analytics;
-//          getWhoopAnalytics now passes patterns=true via Retrofit default ☘️
+//          getWhoopAnalytics now passes patterns=true via Retrofit default;
+//          getPaperTrade/runPaperTrade replaced by getBuddieTrades,
+//          getBuddieBudget, getBuddieCandidates for new Trade tab ☘️
 
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
 import com.vitanest.app.data.remote.BriefResponse
+import com.vitanest.app.data.remote.BuddieBudgetResponse
+import com.vitanest.app.data.remote.BuddieCandidatesResponse
+import com.vitanest.app.data.remote.BuddieTradesResponse
 import com.vitanest.app.data.remote.ChatHistoryResponse
 import com.vitanest.app.data.remote.ChatOpeningResponse
 import com.vitanest.app.data.remote.ChatRequest
@@ -19,6 +24,8 @@ import com.vitanest.app.data.remote.DcaDetailResponse
 import com.vitanest.app.data.remote.DividendDataResponse
 import com.vitanest.app.data.remote.EnergyResponse
 import com.vitanest.app.data.remote.FeedbackRequest
+import com.vitanest.app.data.remote.FinanceAnalyticsResponse
+import com.vitanest.app.data.remote.FinanceSynthesisResponse
 import com.vitanest.app.data.remote.GoalsResponse
 import com.vitanest.app.data.remote.GrowthResponse
 import com.vitanest.app.data.remote.HealthResponse
@@ -33,10 +40,6 @@ import com.vitanest.app.data.remote.PortfolioResponse
 import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.WhoopResponse
-import com.vitanest.app.data.remote.FinanceAnalyticsResponse
-import com.vitanest.app.data.remote.FinanceSynthesisResponse
-import com.vitanest.app.data.remote.PaperTradeResponse
-import com.vitanest.app.data.remote.PaperTradeRunResponse
 import com.vitanest.app.data.remote.WhoopSynthesisResponse
 
 open class VitaClawRepository {
@@ -193,8 +196,6 @@ open class VitaClawRepository {
                 val body = r.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /portfolio/dca/$ticker"))
-            } else if (r.code() == 422) {
-                Result.failure(Exception("'$ticker' not found"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
@@ -215,7 +216,7 @@ open class VitaClawRepository {
     }
 
     open suspend fun runIncomeStress(
-        request: IncomeStressRequest
+        request: IncomeStressRequest = IncomeStressRequest()
     ): Result<IncomeStressResponse> {
         return try {
             val r = apiService.runIncomeStress(request)
@@ -253,7 +254,6 @@ open class VitaClawRepository {
         } catch (e: Exception) { Result.failure(e) }
     }
 
-    // patterns=true is the Retrofit default — no extra param needed here
     open suspend fun getWhoopAnalytics(range: String): Result<WhoopResponse> {
         return try {
             val r = apiService.getWhoopAnalytics(range)
@@ -346,6 +346,7 @@ open class VitaClawRepository {
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
+
     // ── Finance Analytics ─────────────────────────────────────
 
     open suspend fun getFinanceAnalytics(range: String): Result<FinanceAnalyticsResponse> {
@@ -370,28 +371,42 @@ open class VitaClawRepository {
         } catch (e: Exception) { Result.failure(e) }
     }
 
-    // ── Paper Trade ──────────────────────────────────────────
+    // ── Buddie Trade ─────────────────────────────────────────
+    // Replaces getPaperTrade / runPaperTrade — three focused endpoints
 
-    open suspend fun getPaperTrade(): Result<PaperTradeResponse> {
+    open suspend fun getBuddieTrades(
+        month: String? = null,
+        status: String? = null
+    ): Result<BuddieTradesResponse> {
         return try {
-            val r = apiService.getPaperTrade()
+            val r = apiService.getBuddieTrades(month = month, status = status)
             if (r.isSuccessful) {
                 val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response from /buddie/paper-trade/latest"))
-            } else Result.failure(Exception("HTTP \${r.code()}: \${r.message()}"))
+                else Result.failure(Exception("Empty response from /buddie/trades"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
 
-    open suspend fun runPaperTrade(): Result<PaperTradeRunResponse> {
+    open suspend fun getBuddieBudget(months: Int = 3): Result<BuddieBudgetResponse> {
         return try {
-            val r = apiService.runPaperTrade()
+            val r = apiService.getBuddieBudget(months = months)
             if (r.isSuccessful) {
                 val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response from /buddie/paper-trade/run"))
-            } else Result.failure(Exception("HTTP \${r.code()}: \${r.message()}"))
+                else Result.failure(Exception("Empty response from /buddie/budget"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    open suspend fun getBuddieCandidates(): Result<BuddieCandidatesResponse> {
+        return try {
+            val r = apiService.getBuddieCandidates()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /buddie/candidates"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
 }

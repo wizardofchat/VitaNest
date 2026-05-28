@@ -936,36 +936,86 @@ data class FinanceSynthesisResponse(
 )
 
 
-// ── Paper Trade (/buddie/paper-trade) ─────────────────────────
-// Read-only. No auth. Refreshes monthly automatically.
-// Run Now: POST /buddie/paper-trade/run → re-fetches GET after success.
+// ── Buddie Trade (/buddie/trades, /buddie/budget, /buddie/candidates) ────────
+// Replaces old /buddie/paper-trade/latest + /buddie/paper-trade/run
+// Three separate endpoints — fetched independently on Trade tab load
 
 @Serializable
-data class PaperTradeSelection(
-    @SerialName("ticker")                val ticker:              String,
-    @SerialName("shares")                val shares:              Double,
-    @SerialName("price_gbp")             val priceGbp:            Double,
-    @SerialName("capital_gbp")           val capitalGbp:          Double,
-    @SerialName("projected_income_gbp")  val projectedIncomeGbp:  Double,
-    @SerialName("ex_div_date")           val exDivDate:           String,
-    @SerialName("payment_date")          val paymentDate:         String,
-    @SerialName("rationale")             val rationale:           String,
-    @SerialName("status")                val status:              String
+data class BuddieTradeItem(
+    val id: Int,
+    @SerialName("trade_date")            val tradeDate: String,
+    val month: String,
+    val ticker: String,
+    val shares: Double,
+    @SerialName("price_gbp")             val priceGbp: Double,
+    @SerialName("capital_gbp")           val capitalGbp: Double,
+    @SerialName("ex_div_date")           val exDivDate: String,
+    @SerialName("payment_date")          val paymentDate: String,
+    @SerialName("expires_at")            val expiresAt: String,
+    @SerialName("projected_income_gbp")  val projectedIncomeGbp: Double,
+    @SerialName("actual_income_gbp")     val actualIncomeGbp: Double? = null,
+    val rationale: String = "",
+    @SerialName("trade_type")            val tradeType: String,
+    val status: String,
+    @SerialName("created_at")            val createdAt: String = ""
 )
 
 @Serializable
-data class PaperTradeResponse(
-    @SerialName("month")              val month:           String,
-    @SerialName("count")              val count:           Int,
-    @SerialName("total_capital_gbp")  val totalCapitalGbp: Double,
-    @SerialName("total_income_gbp")   val totalIncomeGbp:  Double,
-    @SerialName("selections")         val selections:      List<PaperTradeSelection> = emptyList()
+data class BuddieTradesResponse(
+    @SerialName("trade_count")   val tradeCount: Int,
+    @SerialName("active_count")  val activeCount: Int,
+    @SerialName("expired_count") val expiredCount: Int,
+    val trades: List<BuddieTradeItem> = emptyList()
 )
 
 @Serializable
-data class PaperTradeRunResponse(
-    @SerialName("status") val status: String,
-    @SerialName("output") val output: String = ""
+data class BuddieBudgetMonth(
+    val month: String,
+    @SerialName("opening_gbp")         val openingGbp: Double,
+    @SerialName("spent_gbp")           val spentGbp: Double,
+    @SerialName("remaining_gbp")       val remainingGbp: Double,
+    @SerialName("income_earned_gbp")   val incomeEarnedGbp: Double,
+    @SerialName("income_target_gbp")   val incomeTargetGbp: Double,
+    @SerialName("online_llm_cost_gbp") val onlineLlmCostGbp: Double = 0.0,
+    @SerialName("target_pct")          val targetPct: Double
+)
+
+@Serializable
+data class BuddieBudgetResponse(
+    @SerialName("current_month")  val currentMonth: String,
+    @SerialName("remaining_gbp")  val remainingGbp: Double,
+    @SerialName("target_pct")     val targetPct: Double,
+    val budgets: List<BuddieBudgetMonth> = emptyList()
+)
+
+@Serializable
+data class BuddieCandidateItem(
+    val ticker: String,
+    @SerialName("capital_gbp")      val capitalGbp: Double,
+    @SerialName("projected_income") val projectedIncome: Double,
+    @SerialName("annual_yield")     val annualYield: Double,
+    @SerialName("ex_div_date")      val exDivDate: String,
+    @SerialName("days_to_exdiv")    val daysToExDiv: Int,
+    val confirmed: Boolean,
+    val selected: Boolean
+)
+
+@Serializable
+data class BuddieExcludedItem(
+    val ticker: String,
+    val reason: String
+)
+
+@Serializable
+data class BuddieCandidatesResponse(
+    @SerialName("generated_at")    val generatedAt: String,
+    val month: String,
+    val selected: String,
+    @SerialName("total_evaluated") val totalEvaluated: Int,
+    @SerialName("passed_count")    val passedCount: Int,
+    @SerialName("excluded_count")  val excludedCount: Int,
+    val candidates: List<BuddieCandidateItem> = emptyList(),
+    val excluded: List<BuddieExcludedItem> = emptyList()
 )
 
 // ── Retrofit interface ────────────────────────────────────────
@@ -1080,11 +1130,18 @@ interface VitaClawApiService {
     ): Response<FinanceSynthesisResponse>
 
 
-    @GET("buddie/paper-trade/latest")
-    suspend fun getPaperTrade(): Response<PaperTradeResponse>
+    @GET("buddie/trades")
+    suspend fun getBuddieTrades(
+        @Query("month")  month:  String? = null,
+        @Query("status") status: String? = null
+    ): Response<BuddieTradesResponse>
 
-    @POST("buddie/paper-trade/run")
-    suspend fun runPaperTrade(): Response<PaperTradeRunResponse>
+    @GET("buddie/budget")
+    suspend fun getBuddieBudget(
+        @Query("months") months: Int = 3
+    ): Response<BuddieBudgetResponse>
 
+    @GET("buddie/candidates")
+    suspend fun getBuddieCandidates(): Response<BuddieCandidatesResponse>
 
 }

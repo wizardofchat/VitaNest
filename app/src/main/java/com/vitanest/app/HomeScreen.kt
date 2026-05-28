@@ -653,11 +653,11 @@ fun InkBottomNav(
     modifier: Modifier = Modifier
 ) {
     val items = listOf(
-        Triple("home",             "Home ☘️", "home"),
-        Triple("portfolio_detail", "Finance",  "portfolio_detail"),
-        Triple("energy",           "Energy",   "energy"),
-        Triple("health",           "Growth",   "health"),
-        Triple("ask",              "Ask",      "ask")
+        Triple("home",             "Home ☘️",  "home"),
+        Triple("portfolio_detail", "Finance",   "portfolio_detail"),
+        Triple("health",           "Growth",    "health"),
+        Triple("ask",              "Ask",       "ask"),
+        Triple("buddie_trade",     "Trade",     "buddie_trade")
     )
 
     Column(modifier = modifier.fillMaxWidth()) {
