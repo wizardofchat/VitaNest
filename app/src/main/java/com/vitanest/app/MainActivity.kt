@@ -2,7 +2,8 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // MainActivity — all routes including portfolio_lens + income_stress + health_analytics;
-//               buddie_trade replaces energy in bottom nav — energy still reachable via Home petal ☘️
+//               buddie_trade replaces energy in bottom nav — energy still reachable via Home petal;
+//               banking tab added — Finance tab repurposed; Finance Analytics via Home Finance petal ☘️
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -94,6 +95,26 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("buddie_trade") {
                             BuddieTradeScreen(navController = navController, repository = vitaClawRepository)
+                        }
+                        composable("banking") {
+                            BankingSummaryScreen(navController = navController, repository = vitaClawRepository)
+                        }
+                        composable("banking_analytics") {
+                            BankingAnalyticsScreen(navController = navController, repository = vitaClawRepository)
+                        }
+                        // Route: banking_drill/{month}/{category}/{view}/{sort}
+                        // Pass "null" string for absent params
+                        composable("banking_drill/{month}/{category}/{view}/{sort}") { back ->
+                            val month    = back.arguments?.getString("month")?.takeIf { it != "null" }
+                            val category = back.arguments?.getString("category")?.takeIf { it != "null" }
+                            val view     = back.arguments?.getString("view")?.takeIf { it != "null" }
+                            BankingTransactionDrillScreen(
+                                navController = navController,
+                                repository    = vitaClawRepository,
+                                month         = month,
+                                category      = category,
+                                view          = view
+                            )
                         }
                         composable("energy") {
                             EnergyDetailScreen(navController = navController, repository = vitaClawRepository)

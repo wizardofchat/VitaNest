@@ -8,7 +8,9 @@ package com.vitanest.app.data.remote
 //          added for /growth endpoint;
 //          WhoopPatterns + timeline/detected/correlations models added
 //          for /whoop?patterns=true — extends WhoopResponse with nullable
-//          patterns field; getWhoopAnalytics updated to pass patterns=true ☘️
+//          patterns field; getWhoopAnalytics updated to pass patterns=true;
+//          Banking domain added — models + 2 endpoints (/banking/summary,
+//          /banking/transactions) appended below TradeFeedbackResponse ☘️
 
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -1150,6 +1152,24 @@ interface VitaClawApiService {
         @Query("action") action: String   // "executed" | "skipped"
     ): Response<TradeFeedbackResponse>
 
+    // ── Banking endpoints ─────────────────────────────────────
+    // month=null  → current month (full response with trend + net_worth)
+    // month=YYYY-MM → single month flat response
+    // month=all   → all months map
+
+    @GET("banking/summary")
+    suspend fun getBankingSummary(
+        @Query("month") month: String? = null
+    ): Response<BankingSummaryResponse>
+
+    @GET("banking/transactions")
+    suspend fun getBankingTransactions(
+        @Query("month")    month:    String? = null,
+        @Query("category") category: String? = null,
+        @Query("view")     view:     String? = null,
+        @Query("sort")     sort:     String? = null
+    ): Response<BankingTransactionsResponse>
+
 }
 
 // ── Trade feedback response ───────────────────────────────────
@@ -1163,4 +1183,112 @@ data class TradeFeedbackResponse(
     val status:                         String,   // "executed" | "skipped"
     val message:                        String,
     @SerialName("projected_income_gbp") val projectedIncomeGbp: Double
+)
+// ── Banking ───────────────────────────────────────────────────
+// Models match live /banking/summary and /banking/transactions shapes.
+// Fields with defaults handle optional API fields gracefully.
+// internal_transfers_gbp deserialized but not shown in UI.
+
+@Serializable
+data class BankingAnomaly(
+    val category: String,
+    @SerialName("amount")    val amount: Double,
+    @SerialName("avg_3m")    val avg3m: Double,
+    @SerialName("delta_pct") val deltaPct: Double
+)
+
+@Serializable
+data class BankingCurrent(
+    @SerialName("income_gbp")             val incomeGbp: Double,
+    @SerialName("expenses_gbp")           val expensesGbp: Double,
+    @SerialName("investment_funding_gbp") val investmentFundingGbp: Double,
+    @SerialName("tax_provision_gbp")      val taxProvisionGbp: Double = 0.0,
+    @SerialName("committed_savings_gbp")  val committedSavingsGbp: Double = 0.0,
+    @SerialName("internal_transfers_gbp") val internalTransfersGbp: Double = 0.0,
+    @SerialName("surplus_gbp")            val surplusGbp: Double,
+    @SerialName("true_discretionary_gbp") val trueDiscretionaryGbp: Double,
+    @SerialName("top_categories")         val topCategories: Map<String, Double> = emptyMap(),
+    val anomalies: List<BankingAnomaly> = emptyList(),
+    @SerialName("transaction_count")      val transactionCount: Int = 0
+)
+
+@Serializable
+data class BankingTrend(
+    @SerialName("surplus_3m_avg")                 val surplus3mAvg: Double,
+    @SerialName("surplus_direction")              val surplusDirection: String,
+    @SerialName("surplus_by_month")               val surplusByMonth: Map<String, Double> = emptyMap(),
+    @SerialName("investment_funding_ytd")         val investmentFundingYtd: Double,
+    @SerialName("investment_funding_monthly_avg") val investmentFundingMonthlyAvg: Double,
+    @SerialName("deployment_rate_pct")            val deploymentRatePct: Double,
+    @SerialName("cash_idle_days_avg")             val cashIdleDaysAvg: Double? = null
+)
+
+@Serializable
+data class BankingNetWorth(
+    @SerialName("total_gbp")       val totalGbp: Double,
+    @SerialName("cash_gbp")        val cashGbp: Double,
+    @SerialName("portfolio_gbp")   val portfolioGbp: Double,
+    @SerialName("cash_by_account") val cashByAccount: Map<String, Double> = emptyMap()
+)
+
+@Serializable
+data class BankingMonthSummary(
+    @SerialName("income_gbp")             val incomeGbp: Double,
+    @SerialName("expenses_gbp")           val expensesGbp: Double,
+    @SerialName("surplus_gbp")            val surplusGbp: Double,
+    @SerialName("investment_funding_gbp") val investmentFundingGbp: Double,
+    @SerialName("deployment_rate_pct")    val deploymentRatePct: Double
+)
+
+@Serializable
+data class BankingSummaryResponse(
+    @SerialName("generated_at")        val generatedAt: String = "",
+    @SerialName("months_available")    val monthsAvailable: Int = 0,
+    val accounts: List<String>         = emptyList(),
+    @SerialName("current_month")       val currentMonth: String = "",
+    @SerialName("expenses_incomplete") val expensesIncomplete: Boolean = false,
+    @SerialName("missing_accounts")    val missingAccounts: List<String> = emptyList(),
+    @SerialName("is_stale")            val isStale: Boolean = false,
+    @SerialName("stale_days")          val staleDays: Int? = null,
+    // Full current-month response
+    val current: BankingCurrent? = null,
+    val trend: BankingTrend? = null,
+    @SerialName("net_worth")           val netWorth: BankingNetWorth? = null,
+    // Single-month flat response (?month=YYYY-MM)
+    val month: String? = null,
+    @SerialName("income_gbp")             val incomeGbp: Double? = null,
+    @SerialName("expenses_gbp")           val expensesGbp: Double? = null,
+    @SerialName("surplus_gbp")            val surplusGbp: Double? = null,
+    @SerialName("true_discretionary_gbp") val trueDiscretionaryGbp: Double? = null,
+    @SerialName("investment_funding_gbp") val investmentFundingGbp: Double? = null,
+    @SerialName("deployment_rate_pct")    val deploymentRatePct: Double? = null,
+    @SerialName("top_categories")         val topCategories: Map<String, Double>? = null,
+    @SerialName("transaction_count")      val transactionCount: Int? = null,
+    // All-months response (?month=all)
+    val months: Map<String, BankingMonthSummary>? = null
+)
+
+@Serializable
+data class BankingFilters(
+    val month: String? = null,
+    val category: String? = null,
+    val view: String? = null,
+    val sort: String = "desc"
+)
+
+@Serializable
+data class BankingTransaction(
+    val date: String,
+    val description: String,
+    @SerialName("amount_gbp") val amountGbp: Double,
+    val category: String,
+    @SerialName("account_id") val accountId: String
+)
+
+@Serializable
+data class BankingTransactionsResponse(
+    val filters: BankingFilters,
+    @SerialName("total_gbp")         val totalGbp: Double,
+    @SerialName("transaction_count") val transactionCount: Int,
+    val transactions: List<BankingTransaction> = emptyList()
 )

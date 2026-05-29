@@ -8,7 +8,8 @@ package com.vitanest.app.data.repository
 //          getWhoopAnalytics + getWhoopSynthesis added for health analytics;
 //          getWhoopAnalytics now passes patterns=true via Retrofit default;
 //          getPaperTrade/runPaperTrade replaced by getBuddieTrades,
-//          getBuddieBudget, getBuddieCandidates for new Trade tab ☘️
+//          getBuddieBudget, getBuddieCandidates for new Trade tab;
+//          getBankingSummary + getBankingTransactions added for Banking tab ☘️
 
 import com.vitanest.app.data.remote.AskRequest
 import com.vitanest.app.data.remote.AskResponse
@@ -42,6 +43,8 @@ import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.WhoopResponse
 import com.vitanest.app.data.remote.WhoopSynthesisResponse
+import com.vitanest.app.data.remote.BankingSummaryResponse
+import com.vitanest.app.data.remote.BankingTransactionsResponse
 
 open class VitaClawRepository {
 
@@ -431,6 +434,45 @@ open class VitaClawRepository {
                 409  -> Result.failure(Exception("already_recorded"))
                 else -> Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
             }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Banking ───────────────────────────────────────────────
+    // month=null  → current month (full summary with trend + net_worth)
+    // month=YYYY-MM → single month flat response
+    // month=all   → all months map
+
+    open suspend fun getBankingSummary(
+        month: String? = null
+    ): Result<BankingSummaryResponse> {
+        return try {
+            val r = apiService.getBankingSummary(month = month)
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /banking/summary"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getBankingTransactions(
+        month:    String? = null,
+        category: String? = null,
+        view:     String? = null,
+        sort:     String? = null
+    ): Result<BankingTransactionsResponse> {
+        return try {
+            val r = apiService.getBankingTransactions(
+                month    = month,
+                category = category,
+                view     = view,
+                sort     = sort
+            )
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /banking/transactions"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
 }
