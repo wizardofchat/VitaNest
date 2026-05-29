@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavController
+import com.vitanest.app.data.remote.BankingAllMonthsResponse
 import com.vitanest.app.data.remote.BankingMonthSummary
 import com.vitanest.app.data.remote.BankingSummaryResponse
 import com.vitanest.app.data.repository.VitaClawRepository
@@ -46,6 +47,8 @@ data class AnalyticsUiState(
     val error:     String?                           = null
 )
 
+// ── ViewModel ─────────────────────────────────────────────────
+
 class BankingAnalyticsViewModel(
     private val repository: VitaClawRepository
 ) : ViewModel() {
@@ -59,10 +62,10 @@ class BankingAnalyticsViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
-                val allDeferred     = async { repository.getBankingSummary(month = "all") }
+                val allDeferred     = async { repository.getBankingAllMonths() }
                 val currentDeferred = async { repository.getBankingSummary() }
-                val allResult    = allDeferred.await()
-                val currentResult = currentDeferred.await()
+                val allResult       = allDeferred.await()
+                val currentResult   = currentDeferred.await()
                 _state.value = AnalyticsUiState(
                     allMonths = allResult.getOrNull()?.months ?: emptyMap(),
                     current   = currentResult.getOrNull(),

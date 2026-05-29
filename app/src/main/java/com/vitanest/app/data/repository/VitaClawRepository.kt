@@ -43,6 +43,7 @@ import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.WhoopResponse
 import com.vitanest.app.data.remote.WhoopSynthesisResponse
+import com.vitanest.app.data.remote.BankingAllMonthsResponse
 import com.vitanest.app.data.remote.BankingSummaryResponse
 import com.vitanest.app.data.remote.BankingTransactionsResponse
 
@@ -451,6 +452,17 @@ open class VitaClawRepository {
                 val body = r.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /banking/summary"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun getBankingAllMonths(): Result<BankingAllMonthsResponse> {
+        return try {
+            val r = apiService.getBankingAllMonths()
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /banking/summary?month=all"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }

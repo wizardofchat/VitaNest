@@ -1162,6 +1162,11 @@ interface VitaClawApiService {
         @Query("month") month: String? = null
     ): Response<BankingSummaryResponse>
 
+    @GET("banking/summary")
+    suspend fun getBankingAllMonths(
+        @Query("month") month: String = "all"
+    ): Response<BankingAllMonthsResponse>
+
     @GET("banking/transactions")
     suspend fun getBankingTransactions(
         @Query("month")    month:    String? = null,
@@ -1266,6 +1271,12 @@ data class BankingSummaryResponse(
     @SerialName("transaction_count")      val transactionCount: Int? = null,
     // All-months response (?month=all)
     val months: Map<String, BankingMonthSummary>? = null
+)
+
+@Serializable
+data class BankingAllMonthsResponse(
+    val month: String = "all",
+    val months: Map<String, BankingMonthSummary> = emptyMap()
 )
 
 @Serializable
