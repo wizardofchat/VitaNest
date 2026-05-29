@@ -15,6 +15,11 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -942,6 +947,7 @@ private fun BriefCard(structured: BriefStructured) {
 }
 
 // ── Buddy bubble ──────────────────────────────────────────────
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun BuddyBubble(
     text: String,
@@ -951,12 +957,31 @@ private fun BuddyBubble(
     isQueued: Boolean   = false,
     timeDisplay: String = ""
 ) {
+    val clipboard = LocalClipboardManager.current
+    val haptic    = LocalHapticFeedback.current
+    var copied    by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1500)
+            copied = false
+        }
+    }
+
     Column(modifier = Modifier.fillMaxWidth(0.85f), horizontalAlignment = Alignment.Start) {
         Box(
             modifier = Modifier
                 .background(
                     BuddyGreen,
                     RoundedCornerShape(topStart = 4.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 12.dp)
+                )
+                .combinedClickable(
+                    onClick      = { },
+                    onLongClick  = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        clipboard.setText(AnnotatedString(text))
+                        copied = true
+                    }
                 )
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
@@ -991,6 +1016,14 @@ private fun BuddyBubble(
                 }
             }
         }
+        if (copied) {
+            Text(
+                text     = "Copied",
+                fontSize = 10.sp,
+                color    = T.Muted,
+                modifier = Modifier.padding(top = 2.dp, start = 2.dp)
+            )
+        }
         if (!isLoading) {
             val parts = listOfNotNull(
                 provenance.ifBlank { null },
@@ -1006,8 +1039,20 @@ private fun BuddyBubble(
 }
 
 // ── User bubble ───────────────────────────────────────────────
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun UserBubble(text: String, timeDisplay: String = "") {
+    val clipboard = LocalClipboardManager.current
+    val haptic    = LocalHapticFeedback.current
+    var copied    by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1500)
+            copied = false
+        }
+    }
+
     val shape = RoundedCornerShape(topStart = 12.dp, topEnd = 4.dp,
         bottomEnd = 12.dp, bottomStart = 12.dp)
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
@@ -1016,11 +1061,26 @@ private fun UserBubble(text: String, timeDisplay: String = "") {
                 .fillMaxWidth(0.75f)
                 .background(Color.White, shape)
                 .border(0.5.dp, T.Rule, shape)
+                .combinedClickable(
+                    onClick     = { },
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        clipboard.setText(AnnotatedString(text))
+                        copied = true
+                    }
+                )
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             Text(text = text, fontSize = 13.sp, color = T.Ink, lineHeight = 18.sp)
         }
-        if (timeDisplay.isNotEmpty()) {
+        if (copied) {
+            Text(
+                text     = "Copied",
+                fontSize = 10.sp,
+                color    = T.Muted,
+                modifier = Modifier.padding(top = 2.dp, end = 2.dp)
+            )
+        } else if (timeDisplay.isNotEmpty()) {
             Text(text = timeDisplay, style = T.meta, color = T.Muted,
                 fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
         }
