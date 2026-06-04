@@ -16,6 +16,7 @@ import com.vitanest.app.data.remote.AskResponse
 import com.vitanest.app.data.remote.BriefResponse
 import com.vitanest.app.data.remote.BuddieBudgetResponse
 import com.vitanest.app.data.remote.BuddieCandidatesResponse
+import com.vitanest.app.data.remote.BuddieGrowthCandidatesResponse
 import com.vitanest.app.data.remote.TradeFeedbackResponse
 import com.vitanest.app.data.remote.BuddieTradesResponse
 import com.vitanest.app.data.remote.ChatHistoryResponse
@@ -406,12 +407,28 @@ open class VitaClawRepository {
 
     open suspend fun getBuddieCandidates(): Result<BuddieCandidatesResponse> {
         return try {
-            val r = apiService.getBuddieCandidates()
+            val r = apiService.getBuddieCandidates(track = "income")
             if (r.isSuccessful) {
                 val body = r.body()
                 if (body != null) Result.success(body)
-                else Result.failure(Exception("Empty response from /buddie/candidates"))
+                else Result.failure(Exception("Empty response from /buddie/candidates?track=income"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // Returns null result gracefully when growth report not yet generated (pre-09:00 first run)
+    open suspend fun getBuddieGrowthCandidates(): Result<BuddieGrowthCandidatesResponse> {
+        return try {
+            val r = apiService.getBuddieGrowthCandidates(track = "growth")
+            when (r.code()) {
+                200  -> {
+                    val body = r.body()
+                    if (body != null) Result.success(body)
+                    else Result.failure(Exception("Empty response from /buddie/candidates?track=growth"))
+                }
+                404  -> Result.failure(Exception("not_yet_generated"))
+                else -> Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+            }
         } catch (e: Exception) { Result.failure(e) }
     }
 

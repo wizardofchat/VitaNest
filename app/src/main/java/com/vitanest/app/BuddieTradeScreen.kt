@@ -2,9 +2,11 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // BuddieTradeScreen — dedicated Trade tab
-// Sections: Budget → Active Trades (with feedback) → Candidates → Excluded
+// Sections: Budget → Tab switcher (Income|Growth) → Active Trades → Candidates → Excluded
+// Income tab: yield/ex-div candidates; Growth tab: capital return candidates
 // Feedback: Bought/Skipped POST /buddie/trades/{id}/feedback?action=executed|skipped
-// Status logic: active+window open → buttons · executed/skipped → badge · window closed → muted text ☘️
+// Status logic: active+window open → buttons · executed/skipped → badge · window closed → muted text
+// Growth null state: empty card shown until first agent run at 09:00 ☘️
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -32,6 +34,8 @@ import com.vitanest.app.data.remote.BuddieBudgetResponse
 import com.vitanest.app.data.remote.BuddieCandidateItem
 import com.vitanest.app.data.remote.BuddieCandidatesResponse
 import com.vitanest.app.data.remote.BuddieExcludedItem
+import com.vitanest.app.data.remote.BuddieGrowthCandidateItem
+import com.vitanest.app.data.remote.BuddieGrowthCandidatesResponse
 import com.vitanest.app.data.remote.BuddieTradeItem
 import com.vitanest.app.data.remote.BuddieTradesResponse
 import com.vitanest.app.data.repository.VitaClawRepository
@@ -55,14 +59,20 @@ private val TradeRedBg      = Color(0xFFFCEBEB)
 private val TradeRedFg      = Color(0xFFA32D2D)
 private val TradeMutedBg    = Color(0xFFF2EFE8)
 
+// ── Tab ───────────────────────────────────────────────────────
+
+enum class TradeTab { Income, Growth }
+
 // ── State ─────────────────────────────────────────────────────
 
 data class BuddieTradeState(
-    val trades:      BuddieTradesResponse?     = null,
-    val budget:      BuddieBudgetResponse?     = null,
-    val candidates:  BuddieCandidatesResponse? = null,
-    val isLoading:   Boolean                   = true,
-    val error:       String?                   = null
+    val trades:           BuddieTradesResponse?          = null,
+    val budget:           BuddieBudgetResponse?          = null,
+    val incomeCandidates: BuddieCandidatesResponse?      = null,
+    val growthCandidates: BuddieGrowthCandidatesResponse? = null,
+    val selectedTab:      TradeTab                       = TradeTab.Income,
+    val isLoading:        Boolean                        = true,
+    val error:            String?                        = null
 )
 
 // ── ViewModel ─────────────────────────────────────────────────
@@ -76,28 +86,36 @@ class BuddieTradeViewModel(
 
     init { load() }
 
+    fun selectTab(tab: TradeTab) {
+        _state.value = _state.value.copy(selectedTab = tab)
+    }
+
     fun load() {
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
-                val tradesDeferred     = async { repository.getBuddieTrades() }
-                val budgetDeferred     = async { repository.getBuddieBudget(months = 3) }
-                val candidatesDeferred = async { repository.getBuddieCandidates() }
+                val tradesDeferred          = async { repository.getBuddieTrades() }
+                val budgetDeferred          = async { repository.getBuddieBudget(months = 3) }
+                val incomeCandidatesDeferred = async { repository.getBuddieCandidates() }
+                val growthCandidatesDeferred = async { repository.getBuddieGrowthCandidates() }
 
-                val trades     = tradesDeferred.await()
-                val budget     = budgetDeferred.await()
-                val candidates = candidatesDeferred.await()
+                val trades           = tradesDeferred.await()
+                val budget           = budgetDeferred.await()
+                val incomeCandidates = incomeCandidatesDeferred.await()
+                val growthCandidates = growthCandidatesDeferred.await()
 
-                _state.value = BuddieTradeState(
-                    trades     = trades.getOrNull(),
-                    budget     = budget.getOrNull(),
-                    candidates = candidates.getOrNull(),
-                    isLoading  = false,
-                    error      = if (trades.isFailure && budget.isFailure && candidates.isFailure)
+                _state.value = _state.value.copy(
+                    trades           = trades.getOrNull(),
+                    budget           = budget.getOrNull(),
+                    incomeCandidates = incomeCandidates.getOrNull(),
+                    // null is valid — growth report not yet generated; handled in UI
+                    growthCandidates = growthCandidates.getOrNull(),
+                    isLoading        = false,
+                    error            = if (trades.isFailure && budget.isFailure && incomeCandidates.isFailure)
                         "Could not load trade data" else null
                 )
             } catch (e: Exception) {
-                _state.value = BuddieTradeState(isLoading = false, error = e.message)
+                _state.value = _state.value.copy(isLoading = false, error = e.message)
             }
         }
     }
@@ -198,15 +216,26 @@ fun BuddieTradeScreen(
                     LazyColumn(
                         modifier       = Modifier.fillMaxSize()
                     ) {
-
                         // ── Budget ────────────────────────────
                         state.budget?.let { budget ->
                             item { BudgetSection(budget) }
                         }
 
-                        // ── Active trades ─────────────────────
+                        // ── Tab switcher ──────────────────────
+                        item {
+                            TradeTabRow(
+                                selectedTab   = state.selectedTab,
+                                onTabSelected = { viewModel.selectTab(it) }
+                            )
+                        }
+
+                        // ── Active trades (filtered by track) ─
                         state.trades?.let { tradesResp ->
-                            val active = tradesResp.trades.filter { it.status == "active" }
+                            val trackFilter = if (state.selectedTab == TradeTab.Income)
+                                "paper_buy" else "paper_growth"
+                            val active = tradesResp.trades.filter {
+                                it.status == "active" && it.tradeType == trackFilter
+                            }
                             if (active.isNotEmpty()) {
                                 item {
                                     TradeSectionHeader(
@@ -220,16 +249,27 @@ fun BuddieTradeScreen(
                                 }
                             }
 
-                            // Past trades (non-active) — collapsed
-                            val past = tradesResp.trades.filter { it.status != "active" }
+                            // Past trades for current track — collapsed
+                            val past = tradesResp.trades.filter {
+                                it.status != "active" && it.tradeType == trackFilter
+                            }
                             if (past.isNotEmpty()) {
                                 item { PastTradesSection(past) }
                             }
                         }
 
-                        // ── Candidates ────────────────────────
-                        state.candidates?.let { cands ->
-                            item { CandidatesSection(cands) }
+                        // ── Candidates — tab-switched ─────────
+                        when (state.selectedTab) {
+                            TradeTab.Income -> {
+                                state.incomeCandidates?.let { cands ->
+                                    item { IncomeCandidatesSection(cands) }
+                                }
+                            }
+                            TradeTab.Growth -> {
+                                item {
+                                    GrowthCandidatesSection(state.growthCandidates)
+                                }
+                            }
                         }
                     }
                 }
@@ -672,7 +712,7 @@ private fun PastTradeRow(trade: BuddieTradeItem) {
 // ── Candidates section ────────────────────────────────────────
 
 @Composable
-private fun CandidatesSection(cands: BuddieCandidatesResponse) {
+private fun IncomeCandidatesSection(cands: BuddieCandidatesResponse) {
     var excludedExpanded by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -890,6 +930,325 @@ private fun ExcludedRow(item: BuddieExcludedItem) {
             color    = T.Muted,
             modifier = Modifier.weight(1f),
             textAlign = androidx.compose.ui.text.style.TextAlign.End
+        )
+    }
+}
+
+// ── Tab row ───────────────────────────────────────────────────
+
+@Composable
+private fun TradeTabRow(
+    selectedTab:   TradeTab,
+    onTabSelected: (TradeTab) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = T.screenPadding)
+            .padding(top = 14.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TradeTab.entries.forEach { tab ->
+            val isSelected = tab == selectedTab
+            val label = when (tab) {
+                TradeTab.Income -> "Income"
+                TradeTab.Growth -> "Growth"
+            }
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = if (isSelected) TradeMutedBg else Color.Transparent,
+                        shape = RoundedCornerShape(4.dp)
+                    )
+                    .border(
+                        width = 0.5.dp,
+                        color = if (isSelected) T.Ink else T.Rule,
+                        shape = RoundedCornerShape(4.dp)
+                    )
+                    .clickable { onTabSelected(tab) }
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text       = label,
+                    fontSize   = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                    color      = if (isSelected) T.Ink else T.Muted
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+}
+
+// ── Growth candidates section ─────────────────────────────────
+
+private val TradeBlue   = Color(0xFF185FA5)
+private val TradeBlueBg = Color(0xFFE6F1FB)
+private val TradeBlueFg = Color(0xFF185FA5)
+
+@Composable
+private fun GrowthCandidatesSection(cands: BuddieGrowthCandidatesResponse?) {
+    if (cands == null) {
+        // Empty state — agent hasn't run yet
+        Column(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = T.screenPadding)
+                .padding(top = 24.dp, bottom = 24.dp),
+            horizontalAlignment   = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text      = "GROWTH · CANDIDATES",
+                fontSize  = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color     = T.Muted,
+                letterSpacing = 0.8.sp
+            )
+            Spacer(Modifier.height(20.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TradeMutedBg, RoundedCornerShape(8.dp))
+                    .border(0.5.dp, T.Rule, RoundedCornerShape(8.dp))
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text      = "Buddie's first growth analysis runs tonight at 09:00",
+                        fontSize  = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color     = T.Ink,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text      = "25 growth tickers will be evaluated. The selected candidate will appear here in the morning.",
+                        fontSize  = 11.sp,
+                        color     = T.Muted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    var excludedExpanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Section header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = T.screenPadding)
+                .padding(top = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text          = "GROWTH · ${cands.month}",
+                fontSize      = 10.sp,
+                fontWeight    = FontWeight.Medium,
+                color         = T.Muted,
+                letterSpacing = 0.8.sp
+            )
+            Text(
+                text     = "${cands.passedCount} passed · ${cands.totalEvaluated} evaluated",
+                fontSize = 10.sp,
+                color    = T.Muted
+            )
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+
+        // Stale warning
+        if (cands.isStale && cands.staleDays > 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TradeAmberBg)
+                    .padding(horizontal = T.screenPadding, vertical = 6.dp)
+            ) {
+                Text(
+                    text     = "Data is ${cands.staleDays}d old — agent may not have run",
+                    fontSize = 10.sp,
+                    color    = TradeAmberFg
+                )
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+        }
+
+        val selected  = cands.candidates.firstOrNull { it.selected }
+        val remaining = cands.candidates.filter { !it.selected }
+
+        selected?.let {
+            GrowthCandidateCard(candidate = it, isSelected = true)
+            HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+        }
+
+        if (remaining.isNotEmpty()) {
+            var othersExpanded by remember { mutableStateOf(false) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { othersExpanded = !othersExpanded }
+                    .padding(horizontal = T.screenPadding, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(
+                    text          = "OTHER CANDIDATES",
+                    fontSize      = 10.sp,
+                    fontWeight    = FontWeight.Medium,
+                    color         = T.Muted,
+                    letterSpacing = 0.8.sp
+                )
+                Text(
+                    text     = "${remaining.size} · ${if (othersExpanded) "▲" else "▼"}",
+                    fontSize = 10.sp,
+                    color    = T.Muted
+                )
+            }
+            if (othersExpanded) {
+                remaining.forEach { cand ->
+                    GrowthCandidateCard(candidate = cand, isSelected = false)
+                    HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+                }
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text     = "Generated ${cands.generatedAt}",
+            fontSize = 10.sp,
+            color    = T.Muted,
+            modifier = Modifier
+                .padding(horizontal = T.screenPadding)
+                .padding(bottom = 16.dp)
+        )
+    }
+}
+
+@Composable
+private fun GrowthCandidateCard(
+    candidate:  BuddieGrowthCandidateItem,
+    isSelected: Boolean
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isSelected) Modifier.background(Color(0xFFF0F6FC))
+                else Modifier
+            )
+            .padding(horizontal = T.screenPadding, vertical = 10.dp)
+    ) {
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(
+                    text       = candidate.ticker,
+                    fontSize   = if (isSelected) 16.sp else 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color      = T.Ink
+                )
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .background(TradeBlueBg, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text       = "Selected",
+                            fontSize   = 9.sp,
+                            fontWeight = FontWeight.Medium,
+                            color      = TradeBlueFg
+                        )
+                    }
+                }
+                if (candidate.tradeApproval == "required") {
+                    Box(
+                        modifier = Modifier
+                            .background(TradeAmberBg, RoundedCornerShape(10.dp))
+                            .border(0.5.dp, TradeAmberFg.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text     = "⚠ approval needed",
+                            fontSize = 9.sp,
+                            color    = TradeAmberFg
+                        )
+                    }
+                }
+            }
+            // Score badge
+            Box(
+                modifier = Modifier
+                    .background(TradeMutedBg, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text     = "score ${"%.1f".format(candidate.score)}",
+                    fontSize = 10.sp,
+                    color    = T.Muted
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Return:", fontSize = 11.sp, color = T.Muted)
+                Text(
+                    "+${"%.1f".format(candidate.capitalReturnPct)}%",
+                    fontSize   = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color      = TradeBlue
+                )
+                Text("·", fontSize = 11.sp, color = T.Muted)
+                Text("RSI:", fontSize = 11.sp, color = T.Muted)
+                Text(
+                    "${"%.0f".format(candidate.rsi14)}",
+                    fontSize   = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color      = when {
+                        candidate.rsi14 < 40 -> TradeBlue
+                        candidate.rsi14 > 60 -> TradeAmberFg
+                        else                 -> T.Ink
+                    }
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .background(TradeMutedBg, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text     = "${"%.0f".format(candidate.priceVs52wHigh)}% of 52w high",
+                    fontSize = 10.sp,
+                    color    = T.Muted
+                )
+            }
+        }
+
+        Text(
+            text     = "${candidate.holdingDays}d held · ${candidate.orderCount} orders",
+            fontSize = 10.sp,
+            color    = T.Muted,
+            modifier = Modifier.padding(top = 2.dp)
         )
     }
 }

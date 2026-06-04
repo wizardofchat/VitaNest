@@ -1020,6 +1020,38 @@ data class BuddieCandidatesResponse(
     val excluded: List<BuddieExcludedItem> = emptyList()
 )
 
+// ── Buddie Growth Candidates (/buddie/candidates?track=growth) ────────────────
+// Different shape to income — capital return fields, no yield/ex-div
+
+@Serializable
+data class BuddieGrowthCandidateItem(
+    val ticker: String,
+    val score: Double,
+    @SerialName("capital_return_pct")  val capitalReturnPct: Double,
+    @SerialName("momentum_proxy")      val momentumProxy: Double,
+    val conviction: Double,
+    @SerialName("rsi_14")              val rsi14: Double,
+    @SerialName("price_vs_52w_high")   val priceVs52wHigh: Double,
+    @SerialName("holding_days")        val holdingDays: Int,
+    @SerialName("order_count")         val orderCount: Int,
+    @SerialName("trade_approval")      val tradeApproval: String,   // "free" | "required"
+    val selected: Boolean
+)
+
+@Serializable
+data class BuddieGrowthCandidatesResponse(
+    @SerialName("generated_at")    val generatedAt: String,
+    val month: String,
+    val track: String,
+    val selected: String,
+    @SerialName("total_evaluated") val totalEvaluated: Int,
+    @SerialName("passed_count")    val passedCount: Int,
+    @SerialName("last_updated")    val lastUpdated: String = "",
+    @SerialName("is_stale")        val isStale: Boolean = false,
+    @SerialName("stale_days")      val staleDays: Int = 0,
+    val candidates: List<BuddieGrowthCandidateItem> = emptyList()
+)
+
 // ── Retrofit interface ────────────────────────────────────────
 
 interface VitaClawApiService {
@@ -1144,7 +1176,14 @@ interface VitaClawApiService {
     ): Response<BuddieBudgetResponse>
 
     @GET("buddie/candidates")
-    suspend fun getBuddieCandidates(): Response<BuddieCandidatesResponse>
+    suspend fun getBuddieCandidates(
+        @Query("track") track: String = "income"
+    ): Response<BuddieCandidatesResponse>
+
+    @GET("buddie/candidates")
+    suspend fun getBuddieGrowthCandidates(
+        @Query("track") track: String = "growth"
+    ): Response<BuddieGrowthCandidatesResponse>
 
     @POST("buddie/trades/{id}/feedback")
     suspend fun postTradeFeedback(
