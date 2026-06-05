@@ -229,12 +229,29 @@ fun BuddieTradeScreen(
                             )
                         }
 
-                        // ── Active trades (filtered by track) ─
+                        // ── Candidates first (Buddie's pick) ──
+                        when (state.selectedTab) {
+                            TradeTab.Income -> {
+                                state.incomeCandidates?.let { cands ->
+                                    item { IncomeCandidatesSection(cands) }
+                                }
+                            }
+                            TradeTab.Growth -> {
+                                item {
+                                    GrowthCandidatesSection(state.growthCandidates)
+                                }
+                            }
+                        }
+
+                        // ── Active trades with feedback buttons ─
                         state.trades?.let { tradesResp ->
                             val trackFilter = if (state.selectedTab == TradeTab.Income)
                                 "paper_buy" else "paper_growth"
                             val active = tradesResp.trades.filter {
-                                it.status == "active" && it.tradeType == trackFilter
+                                it.status == "active" && (
+                                        it.tradeType == trackFilter ||
+                                                (state.selectedTab == TradeTab.Income && it.tradeType.isBlank())
+                                        )
                             }
                             if (active.isNotEmpty()) {
                                 item {
@@ -251,24 +268,13 @@ fun BuddieTradeScreen(
 
                             // Past trades for current track — collapsed
                             val past = tradesResp.trades.filter {
-                                it.status != "active" && it.tradeType == trackFilter
+                                it.status != "active" && (
+                                        it.tradeType == trackFilter ||
+                                                (state.selectedTab == TradeTab.Income && it.tradeType.isBlank())
+                                        )
                             }
                             if (past.isNotEmpty()) {
                                 item { PastTradesSection(past) }
-                            }
-                        }
-
-                        // ── Candidates — tab-switched ─────────
-                        when (state.selectedTab) {
-                            TradeTab.Income -> {
-                                state.incomeCandidates?.let { cands ->
-                                    item { IncomeCandidatesSection(cands) }
-                                }
-                            }
-                            TradeTab.Growth -> {
-                                item {
-                                    GrowthCandidatesSection(state.growthCandidates)
-                                }
                             }
                         }
                     }
@@ -438,8 +444,10 @@ private fun ActiveTradeCard(
     val scope      = rememberCoroutineScope()
 
     val windowOpen = remember(trade.expiresAt) {
-        try {
-            !LocalDate.parse(trade.expiresAt, DateTimeFormatter.ISO_LOCAL_DATE)
+        val exp = trade.expiresAt
+        if (exp.isNullOrBlank()) true   // growth trades have no expiry — always open
+        else try {
+            !LocalDate.parse(exp, DateTimeFormatter.ISO_LOCAL_DATE)
                 .isBefore(LocalDate.now())
         } catch (_: Exception) { true }
     }
@@ -525,45 +533,54 @@ private fun ActiveTradeCard(
 
         Spacer(Modifier.height(6.dp))
 
-        // Ex-div countdown
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            Text(
-                text     = "Buy before ${formatTradeDateShort(trade.exDivDate)}",
-                fontSize = 12.sp,
-                color    = T.Muted
-            )
-            Box(
-                modifier = Modifier
-                    .background(exDivBg, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
+        // Income-specific: ex-div countdown + payment info
+        if (trade.tradeType != "paper_growth") {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment     = Alignment.CenterVertically
             ) {
                 Text(
-                    text       = "${daysToExDiv}d",
-                    fontSize   = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    color      = exDivFg
+                    text     = "Buy before ${formatTradeDateShort(trade.exDivDate)}",
+                    fontSize = 12.sp,
+                    color    = T.Muted
                 )
+                Box(
+                    modifier = Modifier
+                        .background(exDivBg, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text       = "${daysToExDiv}d",
+                        fontSize   = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color      = exDivFg
+                    )
+                }
             }
-        }
-
-        Spacer(Modifier.height(6.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("${trade.shares.toInt()} shares @ \u00a3${"%.2f".format(trade.priceGbp)}",
-                fontSize = 12.sp, color = T.Muted)
-            Text("\u00b7", fontSize = 12.sp, color = T.Muted)
-            Text("Capital: \u00a3${"%.2f".format(trade.capitalGbp)}",
-                fontSize = 12.sp, fontWeight = FontWeight.Medium, color = T.Ink)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Income:", fontSize = 12.sp, color = T.Muted)
-            Text("\u00a3${"%.2f".format(trade.projectedIncomeGbp)}",
-                fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TradeGreen)
-            Text("\u00b7 pays ${formatTradeDateShort(trade.paymentDate)}",
-                fontSize = 12.sp, color = T.Muted)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("${trade.shares?.toInt() ?: 0} shares @ £${"%.2f".format(trade.priceGbp)}",
+                    fontSize = 12.sp, color = T.Muted)
+                Text("·", fontSize = 12.sp, color = T.Muted)
+                Text("Capital: £${"%.2f".format(trade.capitalGbp)}",
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium, color = T.Ink)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Income:", fontSize = 12.sp, color = T.Muted)
+                Text("£${"%.2f".format(trade.projectedIncomeGbp)}",
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TradeGreen)
+                Text("· pays ${formatTradeDateShort(trade.paymentDate)}",
+                    fontSize = 12.sp, color = T.Muted)
+            }
+        } else {
+            // Growth-specific: capital context only
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Capital: £${"%.2f".format(trade.capitalGbp)}",
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium, color = T.Ink)
+                Text("·", fontSize = 12.sp, color = T.Muted)
+                Text("Target: +5%", fontSize = 12.sp, color = TradeBlue)
+            }
         }
 
         Spacer(Modifier.height(10.dp))
@@ -1255,14 +1272,16 @@ private fun GrowthCandidateCard(
 
 // ── Date helpers ──────────────────────────────────────────────
 
-private fun daysUntilTrade(dateStr: String): Long {
+private fun daysUntilTrade(dateStr: String?): Long {
+    if (dateStr.isNullOrBlank()) return 0L
     return try {
         val target = LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
         ChronoUnit.DAYS.between(LocalDate.now(), target).coerceAtLeast(0)
     } catch (_: Exception) { 0L }
 }
 
-private fun formatTradeDateShort(dateStr: String): String {
+private fun formatTradeDateShort(dateStr: String?): String {
+    if (dateStr.isNullOrBlank()) return ""
     return try {
         val d = LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
         val month = d.month.name.take(3).lowercase().replaceFirstChar { it.uppercase() }

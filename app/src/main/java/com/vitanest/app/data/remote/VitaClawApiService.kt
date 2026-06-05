@@ -948,16 +948,16 @@ data class BuddieTradeItem(
     @SerialName("trade_date")            val tradeDate: String,
     val month: String,
     val ticker: String,
-    val shares: Double,
-    @SerialName("price_gbp")             val priceGbp: Double,
+    val shares: Double? = null,                          // null for growth trades
+    @SerialName("price_gbp")             val priceGbp: Double = 0.0,
     @SerialName("capital_gbp")           val capitalGbp: Double,
-    @SerialName("ex_div_date")           val exDivDate: String,
-    @SerialName("payment_date")          val paymentDate: String,
-    @SerialName("expires_at")            val expiresAt: String,
-    @SerialName("projected_income_gbp")  val projectedIncomeGbp: Double,
+    @SerialName("ex_div_date")           val exDivDate: String? = null,   // null for growth trades
+    @SerialName("payment_date")          val paymentDate: String? = null, // null for growth trades
+    @SerialName("expires_at")            val expiresAt: String? = null,   // null for growth trades
+    @SerialName("projected_income_gbp")  val projectedIncomeGbp: Double = 0.0,
     @SerialName("actual_income_gbp")     val actualIncomeGbp: Double? = null,
     val rationale: String = "",
-    @SerialName("trade_type")            val tradeType: String,
+    @SerialName("trade_type")            val tradeType: String = "paper_buy",
     val status: String,
     @SerialName("created_at")            val createdAt: String = ""
 )
