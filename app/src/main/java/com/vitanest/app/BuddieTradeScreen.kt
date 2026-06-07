@@ -28,6 +28,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Schedule
 import androidx.navigation.NavController
 import com.vitanest.app.data.remote.BuddieBudgetMonth
 import com.vitanest.app.data.remote.BuddieBudgetResponse
@@ -243,10 +247,11 @@ fun BuddieTradeScreen(
                             }
                         }
 
-                        // ── Active trades with feedback buttons ─
+                        // ── Active trades (unactioned — show buttons) ──
                         state.trades?.let { tradesResp ->
                             val trackFilter = if (state.selectedTab == TradeTab.Income)
                                 "paper_buy" else "paper_growth"
+
                             val active = tradesResp.trades.filter {
                                 it.status == "active" && (
                                         it.tradeType == trackFilter ||
@@ -256,7 +261,7 @@ fun BuddieTradeScreen(
                             if (active.isNotEmpty()) {
                                 item {
                                     TradeSectionHeader(
-                                        label = "Active trades",
+                                        label = "Awaiting your decision",
                                         count = active.size
                                     )
                                 }
@@ -266,15 +271,21 @@ fun BuddieTradeScreen(
                                 }
                             }
 
-                            // Past trades for current track — collapsed
-                            val past = tradesResp.trades.filter {
-                                it.status != "active" && (
+                            // ── Action log (actioned trades — V2 style) ──
+                            val actioned = tradesResp.trades.filter {
+                                it.status in listOf("executed", "skipped", "verified", "expired") && (
                                         it.tradeType == trackFilter ||
                                                 (state.selectedTab == TradeTab.Income && it.tradeType.isBlank())
                                         )
                             }
-                            if (past.isNotEmpty()) {
-                                item { PastTradesSection(past) }
+                            if (actioned.isNotEmpty()) {
+                                item {
+                                    ActionLogSection(
+                                        trades     = actioned,
+                                        trackLabel = if (state.selectedTab == TradeTab.Income)
+                                            "Income" else "Growth"
+                                    )
+                                }
                             }
                         }
                     }
@@ -656,72 +667,168 @@ private fun ActiveTradeCard(
 // ── Past trades (collapsed) ───────────────────────────────────
 
 @Composable
-private fun PastTradesSection(trades: List<BuddieTradeItem>) {
-    var expanded by remember { mutableStateOf(false) }
+private fun ActionLogSection(
+    trades:     List<BuddieTradeItem>,
+    trackLabel: String
+) {
+    val bought   = trades.filter { it.status == "executed" || it.status == "verified" }
+    val skipped  = trades.filter { it.status == "skipped" }
+    val deployed = bought.sumOf { it.capitalGbp.toDouble() }
+    val projectedIncome = bought.sumOf {
+        (it.actualIncomeGbp ?: it.projectedIncomeGbp).toDouble()
+    }
+    val hasVerified = bought.any { it.actualIncomeGbp != null }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
-    ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
         HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(horizontal = T.screenPadding, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
+                .padding(horizontal = T.screenPadding)
+                .padding(top = 12.dp, bottom = 16.dp)
+                .background(TradeMutedBg, RoundedCornerShape(10.dp))
+                .border(0.5.dp, T.Rule, RoundedCornerShape(10.dp))
         ) {
-            Text(
-                text      = "PAST TRADES",
-                fontSize  = 10.sp,
-                fontWeight = FontWeight.Medium,
-                color     = T.Muted,
-                letterSpacing = 0.8.sp
-            )
-            Text(
-                text     = "${trades.size} · ${if (expanded) "▲" else "▼"}",
-                fontSize = 10.sp,
-                color    = T.Muted
-            )
-        }
-        if (expanded) {
-            trades.forEach { trade ->
-                HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
-                PastTradeRow(trade)
+            // Header row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "YOUR ACTIONS · ${trackLabel.uppercase()}",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = T.Muted,
+                    letterSpacing = 0.7.sp
+                )
+                Text(text = "${trades.size} trades", fontSize = 10.sp, color = T.Muted)
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+
+            // Stat bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ActionStatItem(
+                    value = "${bought.size}",
+                    label = "Bought",
+                    valueColor = if (bought.isNotEmpty()) TradeGreen else T.Muted
+                )
+                ActionStatDivider()
+                ActionStatItem(
+                    value = "${skipped.size}",
+                    label = "Skipped",
+                    valueColor = T.Ink
+                )
+                ActionStatDivider()
+                ActionStatItem(
+                    value = "£${"%.0f".format(deployed)}",
+                    label = "Deployed",
+                    valueColor = if (deployed > 0) T.Ink else T.Muted
+                )
+                ActionStatDivider()
+                ActionStatItem(
+                    value = "£${"%.2f".format(projectedIncome)}",
+                    label = if (hasVerified) "Earned" else "Projected",
+                    valueColor = if (hasVerified) TradeGreen else T.Muted
+                )
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+
+            // Action rows
+            trades.forEachIndexed { idx, trade ->
+                ActionLogRow(trade)
+                if (idx < trades.size - 1) {
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = T.Rule,
+                        modifier = Modifier.padding(horizontal = 14.dp)
+                    )
+                }
             }
         }
-        HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
     }
 }
 
 @Composable
-private fun PastTradeRow(trade: BuddieTradeItem) {
+private fun ActionStatItem(value: String, label: String, valueColor: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text = value, fontSize = 17.sp, fontWeight = FontWeight.Medium, color = valueColor)
+        Text(text = label, fontSize = 9.sp, color = T.Muted, letterSpacing = 0.4.sp)
+    }
+}
+
+@Composable
+private fun ActionStatDivider() {
+    Box(modifier = Modifier.width(0.5.dp).height(28.dp).background(T.Rule))
+}
+
+@Composable
+private fun ActionLogRow(trade: BuddieTradeItem) {
+    val isBought  = trade.status == "executed" || trade.status == "verified"
+    val isExpired = trade.status == "expired"
     Row(
-        modifier              = Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = T.screenPadding, vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
-            Text(trade.ticker, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = T.Ink)
-            Text(trade.month, fontSize = 11.sp, color = T.Muted)
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .background(
+                    color = if (isBought) Color(0xFFEAF3DE) else TradeMutedBg,
+                    shape = RoundedCornerShape(8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = when {
+                    isBought  -> Icons.Default.Check
+                    isExpired -> Icons.Default.Schedule
+                    else      -> Icons.Default.Close
+                },
+                contentDescription = trade.status,
+                tint = if (isBought) TradeGreen else T.Muted,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = trade.ticker,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (isExpired) T.Muted else T.Ink
+            )
+            val sub = when {
+                isBought  -> "£${"%.2f".format(trade.capitalGbp)} · ${
+                    if (trade.actualIncomeGbp != null)
+                        "£${"%.2f".format(trade.actualIncomeGbp)} earned"
+                    else
+                        "£${"%.2f".format(trade.projectedIncomeGbp)} projected"
+                }"
+                isExpired -> "Window expired"
+                else      -> "Passed"
+            }
+            Text(text = sub, fontSize = 10.sp, color = T.Muted)
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                text     = "£${"%.2f".format(trade.capitalGbp)}",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color    = T.Ink
+                text = formatTradeDateShort(trade.tradeDate),
+                fontSize = 10.sp,
+                color = T.Muted
             )
-            val actualOrProjected = trade.actualIncomeGbp ?: trade.projectedIncomeGbp
-            Text(
-                text     = "£${"%.2f".format(actualOrProjected)} income",
-                fontSize = 11.sp,
-                color    = if (trade.actualIncomeGbp != null) TradeGreen else T.Muted
-            )
+            if (trade.tradeType == "paper_growth") {
+                Text(text = "growth", fontSize = 9.sp, color = TradeBlue)
+            }
         }
     }
 }
