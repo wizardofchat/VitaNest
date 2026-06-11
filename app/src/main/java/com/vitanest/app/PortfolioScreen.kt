@@ -1,9 +1,10 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// FinanceAnalyticsScreen — light theme matching GrowthScreen aesthetic.
-// Paper cream background, near-black text, serif headings.
-// Buddie synthesis: white card with amber left border (Option B).
+// PortfolioScreen — Finance Analytics repurposed as full Portfolio view.
+// Adds: AllocationBar (income_type default, tap to cycle), HoldingsList,
+//       MarketImpactCard stub. Removes: Raw data collapsible.
+// All existing chart/intelligence/alert/synthesis composables untouched.
 // Entry point: Home Finance petal → finance_analytics route. ☘️
 
 import android.content.ClipData
@@ -61,10 +62,15 @@ import com.vitanest.app.data.remote.GrowthResponse
 import com.vitanest.app.data.remote.GrowthSeries
 import com.vitanest.app.data.remote.WhoopAlert
 import com.vitanest.app.data.repository.VitaClawRepository
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import com.vitanest.app.data.remote.PiesResponse
+import com.vitanest.app.data.remote.LensBreakdownItem
+import com.vitanest.app.data.remote.PortfolioResponse
+import com.vitanest.app.data.remote.Position
 
 // ── Light palette — matches GrowthScreen ─────────────────────
 
@@ -140,6 +146,9 @@ class FinanceAnalyticsViewModel(private val repository: VitaClawRepository) : Vi
     private val _growthLoading = MutableStateFlow(false)
     private val _growthLoaded  = MutableStateFlow(false)
     private val synthesisCache = mutableMapOf<String, FinanceSynthesisResponse>()
+    // ── New: pies + portfolio ────────────────────────────────────
+    private val _pies          = MutableStateFlow<PiesResponse?>(null)
+    private val _portfolio     = MutableStateFlow<PortfolioResponse?>(null)
 
     val finance:       StateFlow<FinanceAnalyticsResponse?> = _finance
     val isLoading:     StateFlow<Boolean>                   = _isLoading
@@ -151,8 +160,10 @@ class FinanceAnalyticsViewModel(private val repository: VitaClawRepository) : Vi
     val growth:        StateFlow<GrowthResponse?>           = _growth
     val growthLoading: StateFlow<Boolean>                   = _growthLoading
     val growthLoaded:  StateFlow<Boolean>                   = _growthLoaded
+    val pies:          StateFlow<PiesResponse?>             = _pies
+    val portfolio:     StateFlow<PortfolioResponse?>        = _portfolio
 
-    init { loadAnalytics("14d") }
+    init { loadAnalytics("14d"); loadPortfolioData() }
 
     fun loadAnalytics(range: String) {
         viewModelScope.launch {
@@ -190,12 +201,17 @@ class FinanceAnalyticsViewModel(private val repository: VitaClawRepository) : Vi
             _growthLoading.value = false
         }
     }
+
+    private fun loadPortfolioData() {
+        viewModelScope.launch { repository.getPortfolioPies().onSuccess { _pies.value = it } }
+        viewModelScope.launch { repository.getPortfolio().onSuccess { _portfolio.value = it } }
+    }
 }
 
 // ── Screen ────────────────────────────────────────────────────
 
 @Composable
-fun FinanceAnalyticsScreen(navController: NavController, repository: VitaClawRepository) {
+fun PortfolioScreen(navController: NavController, repository: VitaClawRepository) {
     val vm: FinanceAnalyticsViewModel = viewModel(
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -211,11 +227,19 @@ fun FinanceAnalyticsScreen(navController: NavController, repository: VitaClawRep
     val synLoading    by vm.synLoading.collectAsState()
     val synError      by vm.synError.collectAsState()
     val growth        by vm.growth.collectAsState()
-    val growthLoading by vm.growthLoading.collectAsState()
+    val pies          by vm.pies.collectAsState()
+    val portfolio     by vm.portfolio.collectAsState()
     var activeChart   by remember { mutableStateOf(FinanceChart.EQUITY) }
 
     Scaffold(
         containerColor = Paper,
+        bottomBar = {
+            InkBottomNav(
+                current       = "health",   // Growth tab is the parent of Portfolio
+                navController = navController,
+                modifier      = Modifier.navigationBarsPadding()
+            )
+        },
         topBar = {
             Column(Modifier.fillMaxWidth().background(White).statusBarsPadding()) {
                 Row(
@@ -228,7 +252,7 @@ fun FinanceAnalyticsScreen(navController: NavController, repository: VitaClawRep
                             tint = NearBlack, modifier = Modifier.size(18.dp))
                     }
                     Column {
-                        Text("Finance", fontSize = 20.sp, fontWeight = FontWeight.Medium,
+                        Text("Portfolio", fontSize = 20.sp, fontWeight = FontWeight.Medium,
                             fontFamily = FontFamily.Serif, color = NearBlack)
                         Text(when (range) { "14d" -> "14-day view"; "30d" -> "30-day view"; else -> "Full history" },
                             fontSize = 11.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
@@ -268,24 +292,439 @@ fun FinanceAnalyticsScreen(navController: NavController, repository: VitaClawRep
                 finance != null -> {
                     val data = finance!!
                     Spacer(Modifier.height(8.dp))
+                    // ── KEPT: stat strip + chart + intelligence + alerts ──
                     FinanceStatStrip(data, activeChart) { activeChart = it }
                     data.series?.let { FinanceChart(it, activeChart, data.thresholds) }
+                    // ── NEW: allocation bar (income_type default, tap to cycle) ──
+                    pies?.let { AllocationBar(it) }
                     data.patterns?.let { FinanceIntelligenceTile(it); Spacer(Modifier.height(6.dp)) }
                     val warnings = data.alerts.filter { it.severity != "ok" }
                     if (warnings.isNotEmpty()) {
                         SectionLabel("Alerts")
                         warnings.forEach { FinanceAlertCard(it); Spacer(Modifier.height(6.dp)) }
                     }
+                    Spacer(Modifier.height(4.dp))
+                    // ── NEW: holdings list (replaces raw data drawer) ──
+                    HoldingsList(
+                        portfolio  = portfolio,
+                        onDetailClick = { navController.navigate("portfolio_detail") }
+                    )
+                    // ── NEW: market impact entry card ──
+                    MarketImpactCard()
                     Spacer(Modifier.height(8.dp))
-                    FinanceGrowthDrawer(growth, growthLoading,
-                        onExpand = { vm.loadGrowth() },
-                        onDetailClick = { navController.navigate("portfolio_detail") })
-                    Spacer(Modifier.height(8.dp))
+                    // ── KEPT: Buddie insight ──
                     val ctx = LocalContext.current
                     FinanceInsightSection(synthesis, synLoading, synError, ctx) { vm.loadSynthesis() }
                 }
             }
         }
+    }
+}
+
+// ── Allocation bar ───────────────────────────────────────────
+
+private enum class AllocLens { INCOME_TYPE, GEOGRAPHY, ASSET_CLASS, CURRENCY }
+
+private fun AllocLens.label() = when (this) {
+    AllocLens.INCOME_TYPE  -> "Income type"
+    AllocLens.GEOGRAPHY    -> "Geography"
+    AllocLens.ASSET_CLASS  -> "Asset class"
+    AllocLens.CURRENCY     -> "Currency"
+}
+
+private fun AllocLens.next() = when (this) {
+    AllocLens.INCOME_TYPE  -> AllocLens.GEOGRAPHY
+    AllocLens.GEOGRAPHY    -> AllocLens.ASSET_CLASS
+    AllocLens.ASSET_CLASS  -> AllocLens.CURRENCY
+    AllocLens.CURRENCY     -> AllocLens.INCOME_TYPE
+}
+
+// Stable colour per key so the bar reads consistently
+private fun allocColor(key: String): Color = when (key) {
+    "income"        -> GreenDark
+    "covered_call"  -> BlueInk
+    "growth"        -> AmberWarm
+    "commodity"     -> Color(0xFF7B5C2E)
+    "mixed"         -> MidGrey
+    "us"            -> Color(0xFF185FA5)
+    "uk"            -> Color(0xFF2D6A4F)
+    "global"        -> Color(0xFF854F0B)
+    "em"            -> Color(0xFF6B4A00)
+    "etf"           -> BlueInk
+    "trust"         -> Color(0xFF2D6A4F)
+    "reit"          -> Color(0xFF854F0B)
+    "GBP"           -> GreenDark
+    "USD"           -> BlueInk
+    else            -> MidGrey
+}
+
+private fun allocLabel(key: String): String = when (key) {
+    "income"       -> "Income"
+    "covered_call" -> "Covered call"
+    "growth"       -> "Growth"
+    "commodity"    -> "Commodity"
+    "mixed"        -> "Mixed"
+    "us"           -> "US"
+    "uk"           -> "UK"
+    "global"       -> "Global"
+    "em"           -> "EM"
+    "etf"          -> "ETF"
+    "trust"        -> "Trust"
+    "reit"         -> "REIT"
+    else           -> key.replaceFirstChar { it.uppercase() }
+}
+
+@Composable
+private fun AllocationBar(pies: PiesResponse) {
+    var lens by remember { mutableStateOf(AllocLens.INCOME_TYPE) }
+
+    val breakdown: Map<String, LensBreakdownItem>? = when (lens) {
+        AllocLens.INCOME_TYPE -> pies.incomeTypeBreakdown
+        AllocLens.GEOGRAPHY   -> pies.geographyBreakdown
+        AllocLens.ASSET_CLASS -> pies.assetClassBreakdown
+        AllocLens.CURRENCY    -> pies.currencyBreakdown
+    }
+
+    if (breakdown.isNullOrEmpty()) return
+
+    // Sort by weight descending for consistent bar order
+    val sorted = breakdown.entries.sortedByDescending { it.value.weightPct }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(White)
+            .border(0.5.dp, LightRule, RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    ) {
+        // Header — tap to cycle lens
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .clickable { lens = lens.next() },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text       = lens.label().uppercase(),
+                fontSize   = 9.sp,
+                color      = MidGrey,
+                fontFamily = FontFamily.SansSerif,
+                letterSpacing = 0.5.sp
+            )
+            Text(
+                text       = "tap to change ↻",
+                fontSize   = 8.sp,
+                color      = MidGrey.copy(alpha = 0.7f),
+                fontFamily = FontFamily.SansSerif
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Segmented bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+        ) {
+            sorted.forEach { (key, item) ->
+                Box(
+                    modifier = Modifier
+                        .weight(item.weightPct.toFloat().coerceAtLeast(0.5f))
+                        .fillMaxHeight()
+                        .background(allocColor(key))
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Legend — two per row
+        val chunked = sorted.chunked(2)
+        chunked.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                row.forEach { (key, item) ->
+                    Row(
+                        modifier              = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(allocColor(key))
+                        )
+                        Text(
+                            text       = "${allocLabel(key)} ${"%.0f".format(item.weightPct)}%",
+                            fontSize   = 9.sp,
+                            color      = MidGrey,
+                            fontFamily = FontFamily.SansSerif,
+                            maxLines   = 1
+                        )
+                    }
+                }
+                // pad if odd number
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(3.dp))
+        }
+    }
+}
+
+// ── Holdings list ─────────────────────────────────────────────
+
+@Composable
+private fun HoldingsList(
+    portfolio:    PortfolioResponse?,
+    onDetailClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(White)
+            .border(0.5.dp, LightRule, RoundedCornerShape(8.dp))
+    ) {
+        // Section header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text          = "HOLDINGS",
+                fontSize      = 9.sp,
+                color         = MidGrey,
+                fontFamily    = FontFamily.SansSerif,
+                letterSpacing = 0.5.sp
+            )
+            if (portfolio != null) {
+                Text(
+                    text       = "${portfolio.positions.size} positions",
+                    fontSize   = 9.sp,
+                    color      = MidGrey,
+                    fontFamily = FontFamily.SansSerif
+                )
+            }
+        }
+
+        HorizontalDivider(color = LightRule, thickness = 0.5.dp)
+
+        when {
+            portfolio == null -> {
+                Box(
+                    modifier         = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color       = NearBlack,
+                        strokeWidth = 1.5.dp,
+                        modifier    = Modifier.size(16.dp)
+                    )
+                }
+            }
+            portfolio.positions.isEmpty() -> {
+                Box(
+                    modifier         = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text       = "No positions found",
+                        fontSize   = 11.sp,
+                        color      = MidGrey,
+                        fontFamily = FontFamily.SansSerif
+                    )
+                }
+            }
+            else -> {
+                // Max value for bar width normalisation
+                val maxValue = portfolio.positions.maxOfOrNull { it.marketValue } ?: 1.0
+
+                portfolio.positions
+                    .sortedByDescending { it.marketValue }
+                    .forEachIndexed { index, position ->
+                        HoldingRow(
+                            position  = position,
+                            maxValue  = maxValue,
+                            onClick   = onDetailClick
+                        )
+                        if (index < portfolio.positions.size - 1) {
+                            HorizontalDivider(
+                                color     = LightRule,
+                                thickness = 0.5.dp,
+                                modifier  = Modifier.padding(horizontal = 12.dp)
+                            )
+                        }
+                    }
+            }
+        }
+
+        // Footer — CSV export
+        HorizontalDivider(color = LightRule, thickness = 0.5.dp)
+        val ctx = LocalContext.current
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .clickable { onDetailClick() }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text       = "Pies · Holdings · Lens →",
+                fontSize   = 10.sp,
+                color      = NearBlack,
+                fontFamily = FontFamily.SansSerif,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun HoldingRow(
+    position: Position,
+    maxValue: Double,
+    onClick:  () -> Unit
+) {
+    val pnlColor = when {
+        position.pnlPct > 0  -> GreenDark
+        position.pnlPct < 0  -> RedInk
+        else                  -> MidGrey
+    }
+    val barFraction = (position.marketValue / maxValue).toFloat().coerceIn(0.02f, 1f)
+
+    Row(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        // Ticker icon
+        Box(
+            modifier         = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Paper),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text       = position.ticker.take(4).replace("l_EQ", "").take(4),
+                fontSize   = 8.sp,
+                fontWeight = FontWeight.Medium,
+                color      = NearBlack,
+                fontFamily = FontFamily.SansSerif,
+                maxLines   = 1
+            )
+        }
+
+        // Middle
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text       = position.ticker.replace("l_EQ", "").replace(".L", ""),
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color      = NearBlack,
+                fontFamily = FontFamily.Serif,
+                maxLines   = 1
+            )
+            Text(
+                text       = "${"%.0f".format(position.quantity)} shares",
+                fontSize   = 10.sp,
+                color      = MidGrey,
+                fontFamily = FontFamily.SansSerif,
+                maxLines   = 1
+            )
+            // Proportional bar
+            Box(
+                modifier = Modifier
+                    .padding(top = 3.dp)
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(LightRule)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(barFraction)
+                        .fillMaxHeight()
+                        .background(GreenDark)
+                )
+            }
+        }
+
+        // Right — value + P&L
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text       = "£${"%.0f".format(position.marketValue)}",
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color      = NearBlack,
+                fontFamily = FontFamily.Serif
+            )
+            Text(
+                text       = "${if (position.pnlPct >= 0) "+" else ""}${"%.1f".format(position.pnlPct)}%",
+                fontSize   = 10.sp,
+                color      = pnlColor,
+                fontFamily = FontFamily.SansSerif
+            )
+        }
+    }
+}
+
+// ── Market Impact entry card ──────────────────────────────────
+
+@Composable
+private fun MarketImpactCard() {
+    // Stub — wires to intelligence/projections/latest when built
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(White)
+            .border(0.5.dp, LightRule, RoundedCornerShape(8.dp))
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text       = "MARKET IMPACT",
+                fontSize   = 9.sp,
+                color      = MidGrey,
+                fontFamily = FontFamily.SansSerif,
+                letterSpacing = 0.5.sp
+            )
+            Text(
+                text       = "Projection screen coming soon",
+                fontSize   = 11.sp,
+                color      = NearBlack,
+                fontFamily = FontFamily.SansSerif
+            )
+        }
+        Text(
+            text       = "→",
+            fontSize   = 14.sp,
+            color      = MidGrey,
+            fontFamily = FontFamily.SansSerif
+        )
     }
 }
 
@@ -534,70 +973,6 @@ private fun FinanceAlertCard(alert: WhoopAlert) {
         }
         Text(alert.message, modifier = Modifier.weight(1f), fontSize = 10.sp, lineHeight = 14.sp,
             color = if (isCritical) RedAlertTx else AmberAlertTx, fontFamily = FontFamily.SansSerif)
-    }
-}
-
-// ── Raw data drawer ───────────────────────────────────────────
-
-@Composable
-private fun FinanceGrowthDrawer(growth: GrowthResponse?, growthLoading: Boolean, onExpand: () -> Unit, onDetailClick: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
-            .clip(RoundedCornerShape(8.dp)).background(White)
-            .border(0.5.dp, LightRule, RoundedCornerShape(8.dp))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded; if (expanded && growth == null) onExpand() }.padding(horizontal = 14.dp, vertical = 11.dp),
-            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Raw data · portfolio series", fontSize = 10.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (growth != null) Text("${growth.series.size} rows", fontSize = 9.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                Text(if (expanded) "▴" else "▾", fontSize = 10.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-            }
-        }
-        AnimatedVisibility(visible = expanded, enter = expandVertically(), exit = shrinkVertically()) {
-            Column {
-                HorizontalDivider(color = LightRule, thickness = 0.5.dp)
-                when {
-                    growthLoading -> Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), Alignment.Center) {
-                        CircularProgressIndicator(color = NearBlack, strokeWidth = 1.5.dp, modifier = Modifier.size(16.dp))
-                    }
-                    growth == null -> Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), Alignment.Center) {
-                        Text("No data", fontSize = 10.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                    }
-                    else -> {
-                        Row(Modifier.fillMaxWidth().background(Paper).padding(horizontal = 14.dp, vertical = 6.dp)) {
-                            Text("Date",     Modifier.width(56.dp), fontSize = 9.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                            Text("Equity",   Modifier.weight(1f),   fontSize = 9.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                            Text("P&L",      Modifier.weight(1f),   fontSize = 9.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                            Text("Deposits", Modifier.weight(0.8f), fontSize = 9.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                        }
-                        HorizontalDivider(color = LightRule, thickness = 0.5.dp)
-                        growth.series.asReversed().forEach { row ->
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp)) {
-                                Text(row.date.takeLast(5), Modifier.width(56.dp), fontSize = 9.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                                Text(row.equityGbp?.let { "£${"%.0f".format(it)}" } ?: "—", Modifier.weight(1f), fontSize = 9.sp, color = if (row.equityGbp != null) NearBlack else MidGrey, fontFamily = FontFamily.SansSerif)
-                                Text(row.pnlGbp?.let { "£${"%.0f".format(it)}" } ?: "—", Modifier.weight(1f), fontSize = 9.sp,
-                                    color = when { row.pnlGbp == null -> MidGrey; row.pnlGbp >= 900.0 -> GreenDark; else -> AmberWarm }, fontFamily = FontFamily.SansSerif)
-                                Text(row.depositsMtd?.let { "${"%.0f".format(it)}" } ?: "—", Modifier.weight(0.8f), fontSize = 9.sp, color = if (row.depositsMtd != null) NearBlack else MidGrey, fontFamily = FontFamily.SansSerif)
-                            }
-                            HorizontalDivider(color = LightRule.copy(alpha = 0.5f), thickness = 0.5.dp)
-                        }
-                        val context = LocalContext.current
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(Paper).border(0.5.dp, LightRule, RoundedCornerShape(6.dp)).clickable { exportGrowthCsv(context, growth.series) }.padding(vertical = 8.dp), Alignment.Center) {
-                                Text("↓ CSV · ${growth.series.size} rows", fontSize = 9.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
-                            }
-                            Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(NearBlack).clickable { onDetailClick() }.padding(vertical = 8.dp), Alignment.Center) {
-                                Text("Pies · Holdings · Lens →", fontSize = 9.sp, color = White, fontWeight = FontWeight.Medium, fontFamily = FontFamily.SansSerif)
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

@@ -15,6 +15,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -652,12 +658,13 @@ fun InkBottomNav(
     navController: NavController,
     modifier: Modifier = Modifier
 ) {
+    // route, label, icon, destination
     val items = listOf(
-        Triple("home",        "Home ☘️", "home"),
-        Triple("banking",     "Banking",  "banking"),
-        Triple("health",      "Growth",   "health"),
-        Triple("ask",         "Ask",      "ask"),
-        Triple("buddie_trade","Trade",    "buddie_trade")
+        NavItem("home",         "Home",    Icons.Filled.Home,           "home"),
+        NavItem("banking",      "Banking", Icons.Filled.AccountBalance,  "banking"),
+        NavItem("health",       "Growth",  Icons.Filled.ShowChart,       "health"),
+        NavItem("ask",          "Ask",     Icons.Filled.QuestionAnswer,  "ask"),
+        NavItem("buddie_trade", "Trade",   Icons.Filled.SwapHoriz,       "buddie_trade")
     )
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -666,29 +673,46 @@ fun InkBottomNav(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(T.Paper)
-                .padding(horizontal = T.screenPadding, vertical = 12.dp),
+                .padding(horizontal = T.screenPadding, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceAround
         ) {
-            items.forEach { (route, label, destination) ->
-                val isActive = current == route
+            items.forEach { item ->
+                val isActive = current == item.route
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier            = Modifier.clickable {
-                        navController.navigate(destination) { launchSingleTop = true }
-                    }
+                    modifier            = Modifier
+                        .clickable {
+                            navController.navigate(item.destination) { launchSingleTop = true }
+                        }
+                        .padding(vertical = 4.dp)
                 ) {
+                    // Home tab keeps the ☘️ leaf emoji as icon
+                    if (item.route == "home") {
+                        Text(
+                            text     = "☘️",
+                            fontSize = 18.sp
+                        )
+                    } else {
+                        Icon(
+                            imageVector         = item.icon,
+                            contentDescription  = item.label,
+                            tint                = if (isActive) T.Ink else T.Muted,
+                            modifier            = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text       = label,
+                        text       = item.label,
                         fontFamily = FontFamily.Default,
-                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                        fontSize   = 11.sp,
+                        fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
+                        fontSize   = 10.sp,
                         color      = if (isActive) T.Ink else T.Muted
                     )
                     if (isActive) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Box(
                             modifier = Modifier
-                                .width(20.dp)
+                                .width(16.dp)
                                 .height(2.dp)
                                 .background(T.Ink)
                         )
@@ -698,3 +722,10 @@ fun InkBottomNav(
         }
     }
 }
+
+private data class NavItem(
+    val route:       String,
+    val label:       String,
+    val icon:        androidx.compose.ui.graphics.vector.ImageVector,
+    val destination: String
+)

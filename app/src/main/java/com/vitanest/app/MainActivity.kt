@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("finance_analytics") {
-                            FinanceAnalyticsScreen(
+                            PortfolioScreen(
                                 navController = navController,
                                 repository    = vitaClawRepository
                             )
