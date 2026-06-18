@@ -9,6 +9,7 @@
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vitanest.app.data.remote.BriefResponse
+import com.vitanest.app.data.remote.BuddieQueryProvenance
 import com.vitanest.app.data.remote.ChatOpeningResponse
 import com.vitanest.app.data.remote.IntentItem
 import com.vitanest.app.data.remote.ObservationItem
@@ -42,7 +43,8 @@ data class BubbleMsg(
     val elapsedMs: Long     = 0L,
     val isLoading: Boolean  = false,
     val isQueued: Boolean   = false,
-    val timeDisplay: String = ""
+    val timeDisplay: String = "",
+    val queryProvenance: BuddieQueryProvenance? = null
 )
 
 data class BuddieUiState(
@@ -159,6 +161,37 @@ class BuddieViewModel(
                         "Could not reach VitaClaw — check Tailscale"
                     val updated = _state.value.bubbles.dropLast(1) +
                             BubbleMsg(role = "buddy", text = errText)
+                    _state.value = _state.value.copy(bubbles = updated)
+                }
+            )
+        }
+    }
+
+    // NLP Query — separate path from sendMessage(). Hits /buddie/query
+    // (skill_executor stack), not /chat. Does not refresh Gemini quota —
+    // this endpoint runs its own Job1/Job2 Gemini Flash calls, not counted
+    // against the /chat 50/day limit.
+    fun sendBuddieQuery(question: String) {
+        if (question.isBlank()) return
+        val trimmed     = question.trim()
+        val userBubble  = BubbleMsg(role = "user", text = trimmed)
+        val placeholder = BubbleMsg(role = "buddy", text = "...", isLoading = true)
+        _state.value = _state.value.copy(bubbles = _state.value.bubbles + userBubble + placeholder)
+
+        viewModelScope.launch {
+            repository.postBuddieQuery(trimmed).fold(
+                onSuccess = { resp ->
+                    val updated = _state.value.bubbles.dropLast(1) + BubbleMsg(
+                        role            = "buddy",
+                        text            = resp.answer,
+                        elapsedMs       = resp.latencyMs,
+                        queryProvenance = resp.provenance
+                    )
+                    _state.value = _state.value.copy(bubbles = updated)
+                },
+                onFailure = { _ ->
+                    val updated = _state.value.bubbles.dropLast(1) +
+                            BubbleMsg(role = "buddy", text = "Could not reach VitaClaw — check Tailscale")
                     _state.value = _state.value.copy(bubbles = updated)
                 }
             )

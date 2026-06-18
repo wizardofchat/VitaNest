@@ -117,6 +117,43 @@ data class ChatOpeningResponse(
     val provenance: String = ""
 )
 
+// ── Buddie NLP Query (skill_executor — separate stack from /chat) ──
+
+@Serializable
+data class BuddieQueryRequest(
+    val question: String,
+    val domain: String = "finance"
+)
+
+@Serializable
+data class BuddieQueryProvenanceJob(
+    val model: String = "",
+    val cost: String = "",
+    @SerialName("latency_ms") val latencyMs: Long = 0L
+)
+
+@Serializable
+data class BuddieQueryProvenance(
+    val tables: List<String> = emptyList(),
+    @SerialName("llm_job1") val llmJob1: BuddieQueryProvenanceJob? = null,
+    @SerialName("llm_job2") val llmJob2: BuddieQueryProvenanceJob? = null,
+    val react: String = "",
+    val confidence: String = "",
+    @SerialName("total_latency_ms") val totalLatencyMs: Long = 0L,
+    val boundary: String = "",                 // IN_DOMAIN | OUT_OF_DOMAIN | AMBIGUOUS
+    @SerialName("boundary_confidence") val boundaryConfidence: Double = 0.0
+)
+
+@Serializable
+data class BuddieQueryResponse(
+    val answer: String = "",
+    val domain: String = "finance",
+    val answered: Boolean = true,
+    @SerialName("react_triggered") val reactTriggered: Boolean = false,
+    val provenance: BuddieQueryProvenance? = null,
+    @SerialName("latency_ms") val latencyMs: Long = 0L
+)
+
 @Serializable
 data class ChatHistoryEntry(
     val role: String,           // "user" | "buddy"
@@ -1067,6 +1104,9 @@ interface VitaClawApiService {
 
     @POST("chat")
     suspend fun sendChat(@Body request: ChatRequest): Response<ChatResponse>
+
+    @POST("buddie/query")
+    suspend fun postBuddieQuery(@Body request: BuddieQueryRequest): Response<BuddieQueryResponse>
 
     @GET("chat/opening")
     suspend fun getChatOpening(): Response<ChatOpeningResponse>

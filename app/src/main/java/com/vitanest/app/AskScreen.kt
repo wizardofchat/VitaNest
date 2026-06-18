@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.vitanest.app.data.remote.BriefStructured
+import com.vitanest.app.data.remote.BuddieQueryProvenance
 import com.vitanest.app.data.remote.ObservationItem
 import com.vitanest.app.data.remote.PendingOfflineItem
 import com.vitanest.app.ui.theme.VitaNestTheme as T
@@ -52,10 +53,11 @@ import com.vitanest.app.data.repository.VitaClawRepository
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
-private enum class ChatMode { AUTO, OFFLINE }
+private enum class ChatMode { AUTO, OFFLINE, QUERY }
 
 private val BuddyGreen  = Color(0xFF2D6A4F)
 private val AmberDash   = Color(0xFFF59E0B)
+private val QueryBlue   = Color(0xFF1D4ED8)
 private val ErrorRed    = Color(0xFFC0392B)
 private val ConfGreen   = Color(0xFF3B6D11)
 private val ConfAmber   = Color(0xFFBA7517)
@@ -117,7 +119,11 @@ fun AskScreen(
     fun sendMessage() {
         if (inputText.isBlank() || isSending) return
         isSending = true
-        viewModel.sendMessage(inputText, chatMode == ChatMode.OFFLINE)
+        if (chatMode == ChatMode.QUERY) {
+            viewModel.sendBuddieQuery(inputText)
+        } else {
+            viewModel.sendMessage(inputText, chatMode == ChatMode.OFFLINE)
+        }
         inputText = ""
         isSending = false
     }
@@ -220,19 +226,30 @@ fun AskScreen(
                     placeholder   = {
                         Text(
                             text      = if (state.quotaExceeded) "Quota exceeded"
-                            else if (chatMode == ChatMode.OFFLINE) "Offline prompt…"
-                            else "Ask Buddy…",
+                            else when (chatMode) {
+                                ChatMode.OFFLINE -> "Offline prompt…"
+                                ChatMode.QUERY   -> "Ask about your finance data…"
+                                else             -> "Ask Buddy…"
+                            },
                             style     = T.meta,
                             fontStyle = FontStyle.Italic
                         )
                     },
-                    enabled         = !state.quotaExceeded && !isSending,
+                    enabled         = (chatMode == ChatMode.QUERY || !state.quotaExceeded) && !isSending,
                     singleLine      = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { sendMessage() }),
                     colors          = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = if (chatMode == ChatMode.OFFLINE) AmberDash else T.Ink,
-                        unfocusedBorderColor = if (chatMode == ChatMode.OFFLINE) AmberDash.copy(alpha = 0.5f) else T.Rule,
+                        focusedBorderColor   = when (chatMode) {
+                            ChatMode.OFFLINE -> AmberDash
+                            ChatMode.QUERY   -> QueryBlue
+                            else             -> T.Ink
+                        },
+                        unfocusedBorderColor = when (chatMode) {
+                            ChatMode.OFFLINE -> AmberDash.copy(alpha = 0.5f)
+                            ChatMode.QUERY   -> QueryBlue.copy(alpha = 0.5f)
+                            else             -> T.Rule
+                        },
                         focusedTextColor     = T.Ink,
                         unfocusedTextColor   = T.Ink,
                         cursorColor          = T.Ink,
@@ -280,9 +297,17 @@ fun AskScreen(
                             modifier       = Modifier.fillMaxWidth().height(36.dp)
                         ) {
                             Text(
-                                text     = if (chatMode == ChatMode.OFFLINE) "Offline" else "Auto",
+                                text     = when (chatMode) {
+                                    ChatMode.OFFLINE -> "Offline"
+                                    ChatMode.QUERY   -> "NLP Query"
+                                    else             -> "Auto"
+                                },
                                 fontSize = 11.sp,
-                                color    = if (chatMode == ChatMode.OFFLINE) AmberDash else T.Ink
+                                color    = when (chatMode) {
+                                    ChatMode.OFFLINE -> AmberDash
+                                    ChatMode.QUERY   -> QueryBlue
+                                    else             -> T.Ink
+                                }
                             )
                             Text(" ▾", fontSize = 11.sp, color = T.Muted)
                         }
@@ -300,6 +325,10 @@ fun AskScreen(
                                 onClick = { chatMode = ChatMode.OFFLINE; modeExpanded = false }
                             )
                             DropdownMenuItem(
+                                text    = { Text("NLP Query — finance data", style = T.meta) },
+                                onClick = { chatMode = ChatMode.QUERY; modeExpanded = false }
+                            )
+                            DropdownMenuItem(
                                 enabled = false,
                                 text    = { Text("Council — coming soon", style = T.meta, color = T.Muted) },
                                 onClick = {}
@@ -310,9 +339,14 @@ fun AskScreen(
                     // Send / Queue
                     Button(
                         onClick        = { sendMessage() },
-                        enabled        = inputText.trim().isNotEmpty() && !isSending && !state.quotaExceeded,
+                        enabled        = inputText.trim().isNotEmpty() && !isSending &&
+                                (chatMode == ChatMode.QUERY || !state.quotaExceeded),
                         colors         = ButtonDefaults.buttonColors(
-                            containerColor         = if (chatMode == ChatMode.OFFLINE) AmberDash else T.Ink,
+                            containerColor         = when (chatMode) {
+                                ChatMode.OFFLINE -> AmberDash
+                                ChatMode.QUERY   -> QueryBlue
+                                else             -> T.Ink
+                            },
                             contentColor           = T.Paper,
                             disabledContainerColor = T.Rule,
                             disabledContentColor   = T.Muted
@@ -409,7 +443,8 @@ fun AskScreen(
                                 elapsedMs   = b.elapsedMs,
                                 isLoading   = b.isLoading,
                                 isQueued    = b.isQueued,
-                                timeDisplay = b.timeDisplay
+                                timeDisplay = b.timeDisplay,
+                                queryProvenance = b.queryProvenance
                             )
                             else -> SystemCard(b.text)
                         }
@@ -955,11 +990,13 @@ private fun BuddyBubble(
     elapsedMs: Long     = 0L,
     isLoading: Boolean  = false,
     isQueued: Boolean   = false,
-    timeDisplay: String = ""
+    timeDisplay: String = "",
+    queryProvenance: BuddieQueryProvenance? = null
 ) {
     val clipboard = LocalClipboardManager.current
     val haptic    = LocalHapticFeedback.current
     var copied    by remember { mutableStateOf(false) }
+    var detailExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(copied) {
         if (copied) {
@@ -968,11 +1005,14 @@ private fun BuddyBubble(
         }
     }
 
+    val isOutOfDomain = queryProvenance?.boundary == "OUT_OF_DOMAIN"
+    val bubbleColor   = if (isOutOfDomain) Color(0xFF6B7280) else BuddyGreen
+
     Column(modifier = Modifier.fillMaxWidth(0.85f), horizontalAlignment = Alignment.Start) {
         Box(
             modifier = Modifier
                 .background(
-                    BuddyGreen,
+                    bubbleColor,
                     RoundedCornerShape(topStart = 4.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 12.dp)
                 )
                 .combinedClickable(
@@ -1033,6 +1073,58 @@ private fun BuddyBubble(
             if (parts.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(text = parts.joinToString(" · "), style = T.meta, color = T.Muted, fontSize = 10.sp)
+            }
+        }
+        if (!isLoading && queryProvenance != null) {
+            Spacer(modifier = Modifier.height(3.dp))
+            Row(
+                modifier = Modifier
+                    .clickable(onClick = { detailExpanded = !detailExpanded }),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                queryProvenance.confidence.ifBlank { null }?.let { conf ->
+                    Box(
+                        modifier = Modifier
+                            .background(T.Rule, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                    ) {
+                        Text(text = conf, fontSize = 9.sp, color = T.Muted)
+                    }
+                }
+                Text(
+                    text     = if (detailExpanded) "How was this answered ▲" else "How was this answered ▼",
+                    fontSize = 10.sp,
+                    color    = T.Muted
+                )
+            }
+            if (detailExpanded) {
+                Column(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .background(Color(0xFFF5F3EE), RoundedCornerShape(6.dp))
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (queryProvenance.tables.isNotEmpty()) {
+                        Text(
+                            text = "Tables: ${queryProvenance.tables.joinToString(", ")}",
+                            fontSize = 10.sp, color = T.Muted
+                        )
+                    }
+                    queryProvenance.llmJob1?.let { j ->
+                        Text(text = "Job 1: ${j.model} · ${j.latencyMs}ms", fontSize = 10.sp, color = T.Muted)
+                    }
+                    queryProvenance.llmJob2?.let { j ->
+                        Text(text = "Job 2: ${j.model} · ${j.latencyMs}ms", fontSize = 10.sp, color = T.Muted)
+                    }
+                    if (queryProvenance.react.isNotBlank()) {
+                        Text(text = "ReAct: ${queryProvenance.react}", fontSize = 10.sp, color = T.Muted)
+                    }
+                    if (queryProvenance.totalLatencyMs > 0) {
+                        Text(text = "Total: ${queryProvenance.totalLatencyMs}ms", fontSize = 10.sp, color = T.Muted)
+                    }
+                }
             }
         }
     }

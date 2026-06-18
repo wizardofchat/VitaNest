@@ -17,6 +17,8 @@ import com.vitanest.app.data.remote.BriefResponse
 import com.vitanest.app.data.remote.BuddieBudgetResponse
 import com.vitanest.app.data.remote.BuddieCandidatesResponse
 import com.vitanest.app.data.remote.BuddieGrowthCandidatesResponse
+import com.vitanest.app.data.remote.BuddieQueryRequest
+import com.vitanest.app.data.remote.BuddieQueryResponse
 import com.vitanest.app.data.remote.TradeFeedbackResponse
 import com.vitanest.app.data.remote.BuddieTradesResponse
 import com.vitanest.app.data.remote.ChatHistoryResponse
@@ -103,6 +105,17 @@ open class VitaClawRepository {
                 else Result.failure(Exception("Empty response from /chat"))
             } else if (r.code() == 429) {
                 Result.failure(Exception("Daily chat limit reached (50/day). Resets at midnight."))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    open suspend fun postBuddieQuery(question: String): Result<BuddieQueryResponse> {
+        return try {
+            val r = apiService.postBuddieQuery(BuddieQueryRequest(question = question))
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /buddie/query"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
