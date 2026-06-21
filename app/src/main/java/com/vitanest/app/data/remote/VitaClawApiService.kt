@@ -1170,7 +1170,9 @@ interface VitaClawApiService {
     suspend fun getEnergy(): Response<EnergyResponse>
 
     @GET("buddie/observations/today")
-    suspend fun getTodayObservations(): Response<ObservationsResponse>
+    suspend fun getTodayObservations(
+        @Query("obs_date") obsDate: String? = null
+    ): Response<ObservationsResponse>
 
     @POST("buddie/observations/{id}/feedback")
     suspend fun postObservationFeedback(

@@ -117,6 +117,87 @@ private val TradeBlueFg     = Color(0xFF185FA5)
 
 enum class TradeTab { Income, Growth }
 
+// ── Observations sub-tab state ──────────────────────────────────
+enum class ObsDomainFilter { ALL, FINANCE, HEALTH, ENERGY, CROSS }
+
+// Maps raw sub-domain strings (e.g. "income_performance", "hrv", "solar")
+// to the four parent filter buckets shown as chips. Mirrors the icon
+// grouping already used in ObservationCard, kept as a single source of truth.
+private fun parentDomainOf(domain: String): ObsDomainFilter = when (domain) {
+    "hrv", "spo2", "strain", "recovery", "rhr", "sleep" -> ObsDomainFilter.HEALTH
+    "finance", "income", "portfolio", "capital",
+    "income_performance", "income_signal",
+    "portfolio_health", "portfolio_performance"         -> ObsDomainFilter.FINANCE
+    "energy", "solar", "ev", "eddi", "grid", "summary"  -> ObsDomainFilter.ENERGY
+    "cross"                                              -> ObsDomainFilter.CROSS
+    else                                                  -> ObsDomainFilter.CROSS
+}
+
+data class ObservationsUiState(
+    val selectedDate:   LocalDate          = LocalDate.now(),
+    val responseDate:   String             = "",
+    val observations:   List<ObservationItem> = emptyList(),
+    val isLoading:      Boolean            = true,
+    val error:          String?            = null,
+    val domainFilter:   ObsDomainFilter    = ObsDomainFilter.ALL
+)
+
+class ObservationsViewModel(
+    private val repository: VitaClawRepository
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(ObservationsUiState())
+    val state: StateFlow<ObservationsUiState> = _state.asStateFlow()
+
+    init { load(LocalDate.now()) }
+
+    fun goToPreviousDay() = load(_state.value.selectedDate.minusDays(1))
+
+    fun goToNextDay() {
+        val next = _state.value.selectedDate.plusDays(1)
+        if (!next.isAfter(LocalDate.now())) load(next)
+    }
+
+    fun isToday(): Boolean = _state.value.selectedDate == LocalDate.now()
+
+    fun setFilter(filter: ObsDomainFilter) {
+        _state.value = _state.value.copy(domainFilter = filter)
+    }
+
+    fun submitFeedback(id: Int, rating: String) {
+        _state.value = _state.value.copy(
+            observations = _state.value.observations.map { obs ->
+                if (obs.id == id) obs.copy(rating = rating) else obs
+            }
+        )
+        viewModelScope.launch {
+            repository.postObservationFeedback(id, rating)
+        }
+    }
+
+    private fun load(date: LocalDate) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoading = true, error = null, selectedDate = date)
+            val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            repository.getTodayObservations(obsDate = dateStr).fold(
+                onSuccess = { resp ->
+                    _state.value = _state.value.copy(
+                        responseDate = resp.date,
+                        observations = resp.observations,
+                        isLoading    = false
+                    )
+                },
+                onFailure = { err ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        error     = err.message ?: "Could not load observations"
+                    )
+                }
+            )
+        }
+    }
+}
+
 data class BuddieTradeState(
     val trades:           BuddieTradesResponse?          = null,
     val budget:           BuddieBudgetResponse?          = null,
@@ -184,6 +265,10 @@ fun BuddieScreen(
     // Trade sub-tab has been opened — same reasoning as unratedObservations below.
     val tradeViewModel = remember { BuddieTradeViewModel(repository) }
     val tradeState      by tradeViewModel.state.collectAsState()
+
+    // Observations sub-tab owns its own day-navigable state, separate from
+    // BuddieViewModel's today-only fetch (used only for the red dot below).
+    val observationsViewModel = remember { ObservationsViewModel(repository) }
 
     LaunchedEffect(Unit) { viewModel.initialise() }
 
@@ -283,7 +368,9 @@ fun BuddieScreen(
                         viewModel  = tradeViewModel,
                         repository = repository
                     )
-                    BuddieSubTab.OBSERVATIONS  -> PlaceholderTabContent("Observations — coming in stage 4")
+                    BuddieSubTab.OBSERVATIONS  -> ObservationsTabContent(
+                        viewModel = observationsViewModel
+                    )
                 }
             }
         }
@@ -781,6 +868,199 @@ private fun TradeTabContent(
             }
         }
     }
+}
+
+// ── Observations sub-tab ─────────────────────────────────────────
+@Composable
+private fun ObservationsTabContent(
+    viewModel: ObservationsViewModel
+) {
+    val state by viewModel.state.collectAsState()
+
+    val dateLabel = remember(state.selectedDate) {
+        if (state.selectedDate == LocalDate.now()) "Today · ${formatObsDateLong(state.selectedDate)}"
+        else formatObsDateLong(state.selectedDate)
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── Day navigation ──────────────────────────────────
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = T.screenPadding, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { viewModel.goToPreviousDay() }, modifier = Modifier.size(32.dp)) {
+                Text("‹", fontSize = 18.sp, color = T.Ink)
+            }
+            Text(text = dateLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = T.Ink)
+            IconButton(
+                onClick  = { viewModel.goToNextDay() },
+                enabled  = !viewModel.isToday(),
+                modifier = Modifier.size(32.dp)
+            ) {
+                Text("›", fontSize = 18.sp, color = if (viewModel.isToday()) T.Rule else T.Ink)
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+
+        when {
+            state.isLoading -> {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    CircularProgressIndicator(
+                        color       = BuddyGreen,
+                        modifier    = Modifier.size(24.dp),
+                        strokeWidth = 1.5.dp
+                    )
+                }
+            }
+            state.error != null -> {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Text(
+                        text      = state.error ?: "Unknown error",
+                        fontSize  = 13.sp,
+                        color     = T.Muted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier  = Modifier.padding(horizontal = 32.dp)
+                    )
+                }
+            }
+            state.observations.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Text(text = "No observations for this day", style = T.meta, color = T.Muted)
+                }
+            }
+            else -> {
+                val unratedCount = state.observations.count { it.rating == null }
+                val unrated = state.observations.filter { it.rating == null }
+                val filtered = if (state.domainFilter == ObsDomainFilter.ALL)
+                    unrated
+                else
+                    unrated.filter { parentDomainOf(it.domain) == state.domainFilter }
+
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    // ── Daily summary line ────────────────
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = T.screenPadding, vertical = 12.dp)
+                        ) {
+                            Row(
+                                modifier              = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment     = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text     = "${state.observations.size} observations",
+                                    fontSize = 12.sp,
+                                    color    = T.Muted
+                                )
+                                if (unratedCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(ErrorRed.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text       = "$unratedCount unrated",
+                                            fontSize   = 10.sp,
+                                            color      = ErrorRed,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                } else {
+                                    Text(text = "All reviewed ✓", fontSize = 10.sp, color = TradeGreenFg)
+                                }
+                            }
+                        }
+                        HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+                    }
+
+                    // ── Filter chips ───────────────────────
+                    item {
+                        LazyRow(
+                            modifier              = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = T.screenPadding, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(
+                                listOf(
+                                    ObsDomainFilter.ALL     to "All",
+                                    ObsDomainFilter.FINANCE to "Finance",
+                                    ObsDomainFilter.HEALTH  to "Health",
+                                    ObsDomainFilter.ENERGY  to "Energy",
+                                    ObsDomainFilter.CROSS   to "Cross"
+                                )
+                            ) { (filterValue, label) ->
+                                val isSelected = state.domainFilter == filterValue
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isSelected) T.Ink else Color.Transparent,
+                                            RoundedCornerShape(16.dp)
+                                        )
+                                        .border(
+                                            width = if (isSelected) 0.dp else 0.5.dp,
+                                            color = T.Rule,
+                                            shape = RoundedCornerShape(16.dp)
+                                        )
+                                        .clickable { viewModel.setFilter(filterValue) }
+                                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text       = label,
+                                        fontSize   = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                                        color      = if (isSelected) T.Paper else T.Muted
+                                    )
+                                }
+                            }
+                        }
+                        HorizontalDivider(thickness = 0.5.dp, color = T.Rule)
+                    }
+
+                    // ── Observation cards ──────────────────
+                    if (filtered.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text  = if (unratedCount == 0) "All observations reviewed ✓"
+                                    else "No unrated observations in this category",
+                                    style = T.meta,
+                                    color = T.Muted
+                                )
+                            }
+                        }
+                    } else {
+                        items(filtered) { obs ->
+                            Box(modifier = Modifier.padding(horizontal = T.screenPadding)) {
+                                ObservationCard(
+                                    obs        = obs,
+                                    onFeedback = { id, rating -> viewModel.submitFeedback(id, rating) }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatObsDateLong(date: LocalDate): String {
+    val dayName = date.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+    val month   = date.month.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+    return "$dayName ${date.dayOfMonth} $month"
 }
 
 // ── Budget section ────────────────────────────────────────────

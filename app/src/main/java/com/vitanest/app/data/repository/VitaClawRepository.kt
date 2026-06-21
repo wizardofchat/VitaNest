@@ -323,9 +323,9 @@ open class VitaClawRepository {
 
     // ── Buddie Observations ───────────────────────────────────
 
-    open suspend fun getTodayObservations(): Result<ObservationsResponse> {
+    open suspend fun getTodayObservations(obsDate: String? = null): Result<ObservationsResponse> {
         return try {
-            val r = apiService.getTodayObservations()
+            val r = apiService.getTodayObservations(obsDate = obsDate)
             if (r.isSuccessful) {
                 val body = r.body()
                 if (body != null) Result.success(body)
