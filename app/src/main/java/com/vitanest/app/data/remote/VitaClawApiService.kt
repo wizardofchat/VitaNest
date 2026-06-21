@@ -135,13 +135,17 @@ data class BuddieQueryProvenanceJob(
 @Serializable
 data class BuddieQueryProvenance(
     val tables: List<String> = emptyList(),
-    @SerialName("llm_job1") val llmJob1: BuddieQueryProvenanceJob? = null,
-    @SerialName("llm_job2") val llmJob2: BuddieQueryProvenanceJob? = null,
-    val react: String = "",
     val confidence: String = "",
-    @SerialName("total_latency_ms") val totalLatencyMs: Long = 0L,
     val boundary: String = "",                 // IN_DOMAIN | OUT_OF_DOMAIN | AMBIGUOUS
-    @SerialName("boundary_confidence") val boundaryConfidence: Double = 0.0
+    @SerialName("boundary_confidence") val boundaryConfidence: Double = 0.0,
+    @SerialName("total_latency_ms") val totalLatencyMs: Long = 0L
+    // NOTE: llm_job1, llm_job2, react, manifest, polars deliberately omitted —
+    // backend returns these as either booleans (manifest/polars/react path-taken
+    // flags) or structured objects (model/cost/latency_ms) depending on which
+    // execution path fired. A single typed field can't safely model both shapes.
+    // Provenance detail UI degrades gracefully without them rather than crashing
+    // deserialization. Revisit once VitaClaw's provenance schema is stable —
+    // see CLAUDE.md skill_executor section.
 )
 
 @Serializable

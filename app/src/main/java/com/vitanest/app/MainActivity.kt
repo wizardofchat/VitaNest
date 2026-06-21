@@ -2,7 +2,7 @@ package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
 // MainActivity — all routes including portfolio_lens + income_stress + health_analytics;
-//               buddie_trade replaces energy in bottom nav — energy still reachable via Home petal;
+//               ask + buddie_trade merged into single "buddie" route/nav item (Chat/Trade/Observations sub-tabs);
 //               banking tab added — Finance tab repurposed; Finance Analytics via Home Finance petal ☘️
 
 import android.os.Bundle
@@ -89,12 +89,9 @@ class MainActivity : ComponentActivity() {
                                 ticker        = ticker
                             )
                         }
-                        composable("ask") {
+                        composable("buddie") {
                             buddieViewModel.initialise(cachedBrief = cachedBrief)
-                            AskScreen(navController = navController, viewModel = buddieViewModel, repository = vitaClawRepository)
-                        }
-                        composable("buddie_trade") {
-                            BuddieTradeScreen(navController = navController, repository = vitaClawRepository)
+                            BuddieScreen(navController = navController, viewModel = buddieViewModel, repository = vitaClawRepository)
                         }
                         composable("banking") {
                             BankingSummaryScreen(navController = navController, repository = vitaClawRepository)

@@ -16,11 +16,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.ShowChart
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -660,11 +659,10 @@ fun InkBottomNav(
 ) {
     // route, label, icon, destination
     val items = listOf(
-        NavItem("home",         "Home",    Icons.Filled.Home,           "home"),
-        NavItem("banking",      "Banking", Icons.Filled.AccountBalance,  "banking"),
-        NavItem("health",       "Growth",  Icons.Filled.ShowChart,       "health"),
-        NavItem("ask",          "Ask",     Icons.Filled.QuestionAnswer,  "ask"),
-        NavItem("buddie_trade", "Trade",   Icons.Filled.SwapHoriz,       "buddie_trade")
+        NavItem("home",    "Home",    Icons.Filled.Home,           "home"),
+        NavItem("banking", "Banking", Icons.Filled.AccountBalance,  "banking"),
+        NavItem("health",  "Growth",  Icons.Filled.ShowChart,       "health"),
+        NavItem("buddie",  "Buddie",  Icons.AutoMirrored.Filled.Chat, "buddie")
     )
 
     Column(modifier = modifier.fillMaxWidth()) {

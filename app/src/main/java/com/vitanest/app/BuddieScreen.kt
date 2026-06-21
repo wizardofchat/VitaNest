@@ -1,10 +1,13 @@
-﻿package com.vitanest.app
+package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// AskScreen — Buddie chat, offline inbox, observations, file upload, clear chat ☘️
-// Layout: Header → Quota → Offline Inbox → Observations → Input → Tiles → Chat
-// Updated: ObservationCard shows domain_memory (v · k badge), confidence_calibrated,
-//          claim_id (stripped OBSERVE: prefix), observation_type (solid/dashed border)
+// BuddieScreen — merged Buddie tab: Chat · Trade · Observations sub-tabs
+// Replaces standalone AskScreen + BuddieTradeScreen in bottom nav (single "Buddie" entry).
+// Stage 1+2 (2026-06-18): shell + sub-tab row + Chat slot fully wired.
+//                         Trade/Observations are stub placeholders — stage 3/4.
+// Layout: Header (title + recovery pill) → Sub-tab row → per-tab content
+// Chat slot content lifted from AskScreen.kt verbatim, minus the observations strip
+// (observations now live in their own sub-tab, not duplicated in Chat). ☘️
 
 import android.content.Context
 import android.content.Intent
@@ -54,6 +57,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 private enum class ChatMode { AUTO, OFFLINE, QUERY }
+private enum class BuddieSubTab { CHAT, TRADE, OBSERVATIONS }
 
 private val BuddyGreen  = Color(0xFF2D6A4F)
 private val AmberDash   = Color(0xFFF59E0B)
@@ -77,67 +81,28 @@ private val DomainNewBg      = Color(0xFFF3F4F6)   // grey-100 — v0 · 0 obs
 private val DomainNewFg      = Color(0xFF9CA3AF)   // grey-400
 
 @Composable
-fun AskScreen(
+fun BuddieScreen(
     navController: NavController,
     viewModel:     BuddieViewModel,
     repository:    VitaClawRepository = VitaClawRepository()
 ) {
-    val state     by viewModel.state.collectAsState()
-    val scope     = rememberCoroutineScope()
-    val listState = rememberLazyListState()
-    val context   = LocalContext.current
-
-    var inputText     by remember { mutableStateOf("") }
-    var chatMode      by remember { mutableStateOf(ChatMode.AUTO) }
-    var modeExpanded  by remember { mutableStateOf(false) }
-    var tilesExpanded by remember { mutableStateOf(false) }
-    var quotaExpanded by remember { mutableStateOf(false) }
-    var inboxExpanded by remember { mutableStateOf(false) }
-    var obsExpanded        by remember { mutableStateOf(false) }
-    var isSending     by remember { mutableStateOf(false) }
+    val state by viewModel.state.collectAsState()
+    var selectedSubTab by remember { mutableStateOf(BuddieSubTab.CHAT) }
 
     LaunchedEffect(Unit) { viewModel.initialise() }
 
-    LaunchedEffect(state.bubbles.size) {
-        if (state.bubbles.isNotEmpty()) {
-            listState.animateScrollToItem(state.bubbles.size - 1)
-        }
-    }
-
-    val filePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let {
-            val text = readTextFile(context, it)
-            if (text.isNotBlank()) {
-                inputText = text.trim()
-                chatMode  = ChatMode.OFFLINE
-            }
-        }
-    }
-
-    fun sendMessage() {
-        if (inputText.isBlank() || isSending) return
-        isSending = true
-        if (chatMode == ChatMode.QUERY) {
-            viewModel.sendBuddieQuery(inputText)
-        } else {
-            viewModel.sendMessage(inputText, chatMode == ChatMode.OFFLINE)
-        }
-        inputText = ""
-        isSending = false
-    }
+    // Red-dot source data — cheap derivation from already-loaded state.
+    // Trade dot: any trade awaiting Bought/Skipped decision this month.
+    // Observations dot: any observation not yet rated useful/wrong/important.
+    val tradeHasUnactioned   = false // wired in stage 3 once BuddieTradeViewModel state is hoisted here
+    val unratedObservations  = state.observations.count { it.rating == null }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(T.Paper)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 80.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxSize().padding(bottom = 120.dp)) {
 
             // ── Header ────────────────────────────────────────
             Column(
@@ -145,7 +110,8 @@ fun AskScreen(
                     .fillMaxWidth()
                     .padding(horizontal = T.screenPadding)
             ) {
-                Spacer(modifier = Modifier.height(52.dp))
+                Spacer(modifier = Modifier.statusBarsPadding())
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier              = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -180,282 +146,51 @@ fun AskScreen(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider(thickness = T.heavyRule, color = T.Ink)
-                Spacer(modifier = Modifier.height(4.dp))
-                QuotaTile(
-                    quota      = state.quotaData,
-                    isExpanded = quotaExpanded,
-                    onToggle   = { quotaExpanded = !quotaExpanded }
-                )
-            }
 
-            // ── Offline Inbox ─────────────────────────────────
-            if (state.offlineJobs.isNotEmpty()) {
-                OfflineInbox(
-                    jobs       = state.offlineJobs,
-                    expanded   = inboxExpanded,
-                    onToggle   = { inboxExpanded = !inboxExpanded },
-                    onDownload = { job ->
-                        downloadJobAsText(context, job)
-                        viewModel.ackOfflineJob(job.jobId)
-                    },
-                    onDismiss  = { job -> viewModel.ackOfflineJob(job.jobId) }
-                )
-            }
-
-            // ── Observations ──────────────────────────────────
-            if (state.observations.isNotEmpty()) {
-                ObservationsInbox(
-                    observations = state.observations,
-                    expanded     = obsExpanded,
-                    onToggle     = { obsExpanded = !obsExpanded },
-                    onFeedback   = { id, rating -> viewModel.submitFeedback(id, rating) }
-                )
-            }
-
-            // ── Input + controls ──────────────────────────────
-            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = T.screenPadding, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                OutlinedTextField(
-                    value         = inputText,
-                    onValueChange = { inputText = it },
-                    placeholder   = {
-                        Text(
-                            text      = if (state.quotaExceeded) "Quota exceeded"
-                            else when (chatMode) {
-                                ChatMode.OFFLINE -> "Offline prompt…"
-                                ChatMode.QUERY   -> "Ask about your finance data…"
-                                else             -> "Ask Buddy…"
-                            },
-                            style     = T.meta,
-                            fontStyle = FontStyle.Italic
-                        )
-                    },
-                    enabled         = (chatMode == ChatMode.QUERY || !state.quotaExceeded) && !isSending,
-                    singleLine      = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { sendMessage() }),
-                    colors          = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = when (chatMode) {
-                            ChatMode.OFFLINE -> AmberDash
-                            ChatMode.QUERY   -> QueryBlue
-                            else             -> T.Ink
-                        },
-                        unfocusedBorderColor = when (chatMode) {
-                            ChatMode.OFFLINE -> AmberDash.copy(alpha = 0.5f)
-                            ChatMode.QUERY   -> QueryBlue.copy(alpha = 0.5f)
-                            else             -> T.Rule
-                        },
-                        focusedTextColor     = T.Ink,
-                        unfocusedTextColor   = T.Ink,
-                        cursorColor          = T.Ink,
-                        disabledBorderColor  = T.Rule,
-                        disabledTextColor    = T.Muted
-                    ),
-                    textStyle = T.meta,
-                    modifier  = Modifier.fillMaxWidth()
-                )
-
+                // ── Sub-tab row ───────────────────────────────
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier              = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment     = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // File upload
-                    OutlinedButton(
-                        onClick        = { filePicker.launch(arrayOf("text/plain", "text/*")) },
-                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                        shape          = RoundedCornerShape(4.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        modifier       = Modifier.height(36.dp)
-                    ) {
-                        Text(text = "File", fontSize = 11.sp, color = T.Muted)
-                    }
-
-                    // Clear chat
-                    OutlinedButton(
-                        onClick        = { viewModel.clearChat() },
-                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                        shape          = RoundedCornerShape(4.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        modifier       = Modifier.height(36.dp)
-                    ) {
-                        Text(text = "Clear", fontSize = 11.sp, color = T.Muted)
-                    }
-
-                    // Mode dropdown
-                    Box(modifier = Modifier.weight(1f)) {
-                        OutlinedButton(
-                            onClick        = { modeExpanded = true },
-                            border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                            shape          = RoundedCornerShape(4.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            modifier       = Modifier.fillMaxWidth().height(36.dp)
-                        ) {
-                            Text(
-                                text     = when (chatMode) {
-                                    ChatMode.OFFLINE -> "Offline"
-                                    ChatMode.QUERY   -> "NLP Query"
-                                    else             -> "Auto"
-                                },
-                                fontSize = 11.sp,
-                                color    = when (chatMode) {
-                                    ChatMode.OFFLINE -> AmberDash
-                                    ChatMode.QUERY   -> QueryBlue
-                                    else             -> T.Ink
-                                }
-                            )
-                            Text(" ▾", fontSize = 11.sp, color = T.Muted)
-                        }
-                        DropdownMenu(
-                            expanded         = modeExpanded,
-                            onDismissRequest = { modeExpanded = false },
-                            modifier         = Modifier.background(T.Paper)
-                        ) {
-                            DropdownMenuItem(
-                                text    = { Text("Auto — Polars → Gemini", style = T.meta) },
-                                onClick = { chatMode = ChatMode.AUTO; modeExpanded = false }
-                            )
-                            DropdownMenuItem(
-                                text    = { Text("Offline — dolphin3:8b", style = T.meta) },
-                                onClick = { chatMode = ChatMode.OFFLINE; modeExpanded = false }
-                            )
-                            DropdownMenuItem(
-                                text    = { Text("NLP Query — finance data", style = T.meta) },
-                                onClick = { chatMode = ChatMode.QUERY; modeExpanded = false }
-                            )
-                            DropdownMenuItem(
-                                enabled = false,
-                                text    = { Text("Council — coming soon", style = T.meta, color = T.Muted) },
-                                onClick = {}
-                            )
-                        }
-                    }
-
-                    // Send / Queue
-                    Button(
-                        onClick        = { sendMessage() },
-                        enabled        = inputText.trim().isNotEmpty() && !isSending &&
-                                (chatMode == ChatMode.QUERY || !state.quotaExceeded),
-                        colors         = ButtonDefaults.buttonColors(
-                            containerColor         = when (chatMode) {
-                                ChatMode.OFFLINE -> AmberDash
-                                ChatMode.QUERY   -> QueryBlue
-                                else             -> T.Ink
-                            },
-                            contentColor           = T.Paper,
-                            disabledContainerColor = T.Rule,
-                            disabledContentColor   = T.Muted
-                        ),
-                        shape          = RoundedCornerShape(4.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier       = Modifier.height(36.dp)
-                    ) {
-                        Text(
-                            text       = if (chatMode == ChatMode.OFFLINE) "Queue" else "Send",
-                            fontSize   = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    SubTabChip(
+                        label    = "Chat",
+                        selected = selectedSubTab == BuddieSubTab.CHAT,
+                        showDot  = false,
+                        onClick  = { selectedSubTab = BuddieSubTab.CHAT }
+                    )
+                    SubTabChip(
+                        label    = "Trade",
+                        selected = selectedSubTab == BuddieSubTab.TRADE,
+                        showDot  = tradeHasUnactioned,
+                        onClick  = { selectedSubTab = BuddieSubTab.TRADE }
+                    )
+                    SubTabChip(
+                        label    = "Observations",
+                        selected = selectedSubTab == BuddieSubTab.OBSERVATIONS,
+                        showDot  = unratedObservations > 0,
+                        onClick  = { selectedSubTab = BuddieSubTab.OBSERVATIONS }
+                    )
                 }
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
-            // ── Quick tiles ───────────────────────────────────
-            if (state.intents.isNotEmpty()) {
-                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-                Spacer(modifier = Modifier.height(8.dp))
-                val visible = if (tilesExpanded) state.intents else state.intents.take(6)
-                LazyRow(
-                    modifier              = Modifier.padding(horizontal = T.screenPadding),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(visible) { intent ->
-                        IntentTile(
-                            label = intent.label,
-                            onTap = {
-                                inputText = intent.testQuery
-                                sendMessage()
-                            }
-                        )
-                    }
-                    if (state.intents.size > 6) {
-                        item {
-                            IntentExpandChip(
-                                expanded = tilesExpanded,
-                                count    = state.intents.size - 6,
-                                onTap    = { tilesExpanded = !tilesExpanded }
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-            }
-
-            // ── Chat area ─────────────────────────────────────
-            if (state.isLoading) {
-                Box(
-                    modifier         = Modifier.weight(1f).fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            color       = BuddyGreen,
-                            strokeWidth = 1.5.dp,
-                            modifier    = Modifier.size(24.dp)
-                        )
-                        Text(text = "Buddy is thinking…", style = T.meta, color = T.Muted)
-                    }
-                }
-            } else {
-                LazyColumn(
-                    state          = listState,
-                    modifier       = Modifier
-                        .weight(1f)
-                        .padding(horizontal = T.screenPadding),
-                    contentPadding = PaddingValues(top = 12.dp, bottom = 8.dp)
-                ) {
-                    state.briefData?.structured?.let { s ->
-                        item {
-                            BriefCard(structured = s)
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-                    }
-                    state.opening?.let { o ->
-                        item {
-                            BuddyBubble(text = o.summary, provenance = o.provenance)
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-                    }
-                    items(state.bubbles) { b ->
-                        when (b.role) {
-                            "user"  -> UserBubble(b.text, b.timeDisplay)
-                            "buddy" -> BuddyBubble(
-                                text        = b.text,
-                                provenance  = b.provenance,
-                                elapsedMs   = b.elapsedMs,
-                                isLoading   = b.isLoading,
-                                isQueued    = b.isQueued,
-                                timeDisplay = b.timeDisplay,
-                                queryProvenance = b.queryProvenance
-                            )
-                            else -> SystemCard(b.text)
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
+            // ── Sub-tab content ───────────────────────────────
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when (selectedSubTab) {
+                    BuddieSubTab.CHAT          -> ChatTabContent(
+                        navController = navController,
+                        viewModel     = viewModel,
+                        repository    = repository
+                    )
+                    BuddieSubTab.TRADE         -> PlaceholderTabContent("Trade — coming in stage 3")
+                    BuddieSubTab.OBSERVATIONS  -> PlaceholderTabContent("Observations — coming in stage 4")
                 }
             }
         }
 
         InkBottomNav(
-            current       = "ask",
+            current       = "buddie",
             navController = navController,
             modifier      = Modifier
                 .align(Alignment.BottomCenter)
@@ -464,87 +199,369 @@ fun AskScreen(
     }
 }
 
-// ── Observations Inbox ────────────────────────────────────────
+// ── Sub-tab chip ──────────────────────────────────────────────
 @Composable
-private fun ObservationsInbox(
-    observations: List<ObservationItem>,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    onFeedback: (Int, String) -> Unit
+private fun SubTabChip(
+    label: String,
+    selected: Boolean,
+    showDot: Boolean,
+    onClick: () -> Unit
 ) {
-    val unratedCount = observations.count { it.rating == null }
-    Column(
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFFF5F3EE))
-            .clickable(onClick = onToggle)
-            .animateContentSize()
+            .background(
+                if (selected) T.Ink else Color.Transparent,
+                RoundedCornerShape(16.dp)
+            )
+            .border(
+                width = if (selected) 0.dp else 0.5.dp,
+                color = T.Rule,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
     ) {
-        // ── Header row ────────────────────────────────────────
-        Row(
-            modifier              = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = T.screenPadding, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                Text(text = "Today's observations", style = T.sectionHead, color = T.Ink)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text       = label,
+                fontSize   = 12.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                color      = if (selected) T.Paper else T.Muted
+            )
+            if (showDot) {
                 Box(
                     modifier = Modifier
-                        .background(
-                            if (unratedCount > 0) T.Ink else Color(0xFF3B6D11),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text       = if (unratedCount > 0) "$unratedCount" else "✓",
-                        fontSize   = 10.sp,
-                        color      = T.Paper,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                // Red dot only if unrated remain
-                if (unratedCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(ErrorRed, RoundedCornerShape(3.dp))
-                    )
-                }
+                        .size(6.dp)
+                        .background(ErrorRed, RoundedCornerShape(3.dp))
+                )
             }
-            Text(text = if (expanded) "▲" else "▼", style = T.meta, color = T.Muted)
+        }
+    }
+}
+
+// ── Placeholder (stage 3/4 fill these in) ──────────────────────
+@Composable
+private fun PlaceholderTabContent(label: String) {
+    Box(
+        modifier         = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = label, style = T.meta, color = T.Muted)
+    }
+}
+
+// ── Chat sub-tab ────────────────────────────────────────────────
+// Lifted from AskScreen.kt verbatim (header/nav stripped — shell owns those).
+// Observations strip removed — relocated to its own sub-tab, not duplicated here.
+@Composable
+private fun ChatTabContent(
+    navController: NavController,
+    viewModel:     BuddieViewModel,
+    repository:    VitaClawRepository
+) {
+    val state     by viewModel.state.collectAsState()
+    val scope     = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val context   = LocalContext.current
+
+    var inputText     by remember { mutableStateOf("") }
+    var chatMode      by remember { mutableStateOf(ChatMode.AUTO) }
+    var modeExpanded  by remember { mutableStateOf(false) }
+    var tilesExpanded by remember { mutableStateOf(false) }
+    var quotaExpanded by remember { mutableStateOf(false) }
+    var inboxExpanded by remember { mutableStateOf(false) }
+    var isSending     by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.bubbles.size) {
+        if (state.bubbles.isNotEmpty()) {
+            listState.animateScrollToItem(state.bubbles.size - 1)
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            val text = readTextFile(context, it)
+            if (text.isNotBlank()) {
+                inputText = text.trim()
+                chatMode  = ChatMode.OFFLINE
+            }
+        }
+    }
+
+    fun sendMessage() {
+        if (inputText.isBlank() || isSending) return
+        isSending = true
+        if (chatMode == ChatMode.QUERY) {
+            viewModel.sendBuddieQuery(inputText)
+        } else {
+            viewModel.sendMessage(inputText, chatMode == ChatMode.OFFLINE)
+        }
+        inputText = ""
+        isSending = false
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        QuotaTile(
+            quota      = state.quotaData,
+            isExpanded = quotaExpanded,
+            onToggle   = { quotaExpanded = !quotaExpanded }
+        )
+
+        // ── Offline Inbox ─────────────────────────────────
+        if (state.offlineJobs.isNotEmpty()) {
+            OfflineInbox(
+                jobs       = state.offlineJobs,
+                expanded   = inboxExpanded,
+                onToggle   = { inboxExpanded = !inboxExpanded },
+                onDownload = { job ->
+                    downloadJobAsText(context, job)
+                    viewModel.ackOfflineJob(job.jobId)
+                },
+                onDismiss  = { job -> viewModel.ackOfflineJob(job.jobId) }
+            )
         }
 
-        // ── Expanded cards ────────────────────────────────────
-        if (expanded) {
-            val unrated = observations.filter { it.rating == null }
-            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-            if (unrated.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = T.screenPadding, vertical = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "All observations reviewed ✓", style = T.meta, color = T.Muted)
-                }
-            } else {
+        // ── Chat area (weighted — fills remaining space, pushing
+        //    tiles + input bar down to sit just above the bottom nav) ──
+        if (state.isLoading) {
+            Box(
+                modifier         = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 480.dp)
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = T.screenPadding, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    unrated.forEach { obs ->
-                        ObservationCard(obs = obs, onFeedback = onFeedback)
+                    CircularProgressIndicator(
+                        color       = BuddyGreen,
+                        strokeWidth = 1.5.dp,
+                        modifier    = Modifier.size(24.dp)
+                    )
+                    Text(text = "Buddy is thinking…", style = T.meta, color = T.Muted)
+                }
+            }
+        } else {
+            LazyColumn(
+                state          = listState,
+                modifier       = Modifier
+                    .weight(1f)
+                    .padding(horizontal = T.screenPadding),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 8.dp)
+            ) {
+                state.briefData?.structured?.let { s ->
+                    item {
+                        BriefCard(structured = s)
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
+                }
+                state.opening?.let { o ->
+                    item {
+                        BuddyBubble(text = o.summary, provenance = o.provenance)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+                items(state.bubbles) { b ->
+                    when (b.role) {
+                        "user"  -> UserBubble(b.text, b.timeDisplay)
+                        "buddy" -> BuddyBubble(
+                            text        = b.text,
+                            provenance  = b.provenance,
+                            elapsedMs   = b.elapsedMs,
+                            isLoading   = b.isLoading,
+                            isQueued    = b.isQueued,
+                            timeDisplay = b.timeDisplay,
+                            queryProvenance = b.queryProvenance
+                        )
+                        else -> SystemCard(b.text)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+
+        // ── Quick tiles ───────────────────────────────────
+        if (state.intents.isNotEmpty()) {
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            Spacer(modifier = Modifier.height(8.dp))
+            val visible = if (tilesExpanded) state.intents else state.intents.take(6)
+            LazyRow(
+                modifier              = Modifier.padding(horizontal = T.screenPadding),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(visible) { intent ->
+                    IntentTile(
+                        label = intent.label,
+                        onTap = {
+                            inputText = intent.testQuery
+                            sendMessage()
+                        }
+                    )
+                }
+                if (state.intents.size > 6) {
+                    item {
+                        IntentExpandChip(
+                            expanded = tilesExpanded,
+                            count    = state.intents.size - 6,
+                            onTap    = { tilesExpanded = !tilesExpanded }
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+        }
+
+        // ── Input + controls (pinned bottom) ───────────────
+        HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = T.screenPadding, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedTextField(
+                value         = inputText,
+                onValueChange = { inputText = it },
+                placeholder   = {
+                    Text(
+                        text      = if (state.quotaExceeded) "Quota exceeded"
+                        else when (chatMode) {
+                            ChatMode.OFFLINE -> "Offline prompt…"
+                            ChatMode.QUERY   -> "Ask about your finance data…"
+                            else             -> "Ask Buddy…"
+                        },
+                        style     = T.meta,
+                        fontStyle = FontStyle.Italic
+                    )
+                },
+                enabled         = (chatMode == ChatMode.QUERY || !state.quotaExceeded) && !isSending,
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { sendMessage() }),
+                colors          = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = when (chatMode) {
+                        ChatMode.OFFLINE -> AmberDash
+                        ChatMode.QUERY   -> QueryBlue
+                        else             -> T.Ink
+                    },
+                    unfocusedBorderColor = when (chatMode) {
+                        ChatMode.OFFLINE -> AmberDash.copy(alpha = 0.5f)
+                        ChatMode.QUERY   -> QueryBlue.copy(alpha = 0.5f)
+                        else             -> T.Rule
+                    },
+                    focusedTextColor     = T.Ink,
+                    unfocusedTextColor   = T.Ink,
+                    cursorColor          = T.Ink,
+                    disabledBorderColor  = T.Rule,
+                    disabledTextColor    = T.Muted
+                ),
+                textStyle = T.meta,
+                modifier  = Modifier.fillMaxWidth()
+            )
+
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                // File upload
+                OutlinedButton(
+                    onClick        = { filePicker.launch(arrayOf("text/plain", "text/*")) },
+                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier       = Modifier.height(36.dp)
+                ) {
+                    Text(text = "File", fontSize = 11.sp, color = T.Muted)
+                }
+
+                // Clear chat
+                OutlinedButton(
+                    onClick        = { viewModel.clearChat() },
+                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier       = Modifier.height(36.dp)
+                ) {
+                    Text(text = "Clear", fontSize = 11.sp, color = T.Muted)
+                }
+
+                // Mode dropdown
+                Box(modifier = Modifier.weight(1f)) {
+                    OutlinedButton(
+                        onClick        = { modeExpanded = true },
+                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier       = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Text(
+                            text     = when (chatMode) {
+                                ChatMode.OFFLINE -> "Offline"
+                                ChatMode.QUERY   -> "NLP Query"
+                                else             -> "Auto"
+                            },
+                            fontSize = 11.sp,
+                            color    = when (chatMode) {
+                                ChatMode.OFFLINE -> AmberDash
+                                ChatMode.QUERY   -> QueryBlue
+                                else             -> T.Ink
+                            }
+                        )
+                        Text(" ▾", fontSize = 11.sp, color = T.Muted)
+                    }
+                    DropdownMenu(
+                        expanded         = modeExpanded,
+                        onDismissRequest = { modeExpanded = false },
+                        modifier         = Modifier.background(T.Paper)
+                    ) {
+                        DropdownMenuItem(
+                            text    = { Text("Auto — Polars → Gemini", style = T.meta) },
+                            onClick = { chatMode = ChatMode.AUTO; modeExpanded = false }
+                        )
+                        DropdownMenuItem(
+                            text    = { Text("Offline — dolphin3:8b", style = T.meta) },
+                            onClick = { chatMode = ChatMode.OFFLINE; modeExpanded = false }
+                        )
+                        DropdownMenuItem(
+                            text    = { Text("NLP Query — finance data", style = T.meta) },
+                            onClick = { chatMode = ChatMode.QUERY; modeExpanded = false }
+                        )
+                        DropdownMenuItem(
+                            enabled = false,
+                            text    = { Text("Council — coming soon", style = T.meta, color = T.Muted) },
+                            onClick = {}
+                        )
+                    }
+                }
+
+                // Send / Queue
+                Button(
+                    onClick        = { sendMessage() },
+                    enabled        = inputText.trim().isNotEmpty() && !isSending &&
+                            (chatMode == ChatMode.QUERY || !state.quotaExceeded),
+                    colors         = ButtonDefaults.buttonColors(
+                        containerColor         = when (chatMode) {
+                            ChatMode.OFFLINE -> AmberDash
+                            ChatMode.QUERY   -> QueryBlue
+                            else             -> T.Ink
+                        },
+                        contentColor           = T.Paper,
+                        disabledContainerColor = T.Rule,
+                        disabledContentColor   = T.Muted
+                    ),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    modifier       = Modifier.height(36.dp)
+                ) {
+                    Text(
+                        text       = if (chatMode == ChatMode.OFFLINE) "Queue" else "Send",
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
@@ -1111,15 +1128,6 @@ private fun BuddyBubble(
                             text = "Tables: ${queryProvenance.tables.joinToString(", ")}",
                             fontSize = 10.sp, color = T.Muted
                         )
-                    }
-                    queryProvenance.llmJob1?.let { j ->
-                        Text(text = "Job 1: ${j.model} · ${j.latencyMs}ms", fontSize = 10.sp, color = T.Muted)
-                    }
-                    queryProvenance.llmJob2?.let { j ->
-                        Text(text = "Job 2: ${j.model} · ${j.latencyMs}ms", fontSize = 10.sp, color = T.Muted)
-                    }
-                    if (queryProvenance.react.isNotBlank()) {
-                        Text(text = "ReAct: ${queryProvenance.react}", fontSize = 10.sp, color = T.Muted)
                     }
                     if (queryProvenance.totalLatencyMs > 0) {
                         Text(text = "Total: ${queryProvenance.totalLatencyMs}ms", fontSize = 10.sp, color = T.Muted)

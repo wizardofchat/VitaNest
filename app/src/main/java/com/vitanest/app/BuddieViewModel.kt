@@ -191,7 +191,7 @@ class BuddieViewModel(
                 },
                 onFailure = { _ ->
                     val updated = _state.value.bubbles.dropLast(1) +
-                            BubbleMsg(role = "buddy", text = "Could not reach VitaClaw — check Tailscale")
+                            BubbleMsg(role = "buddy", text = "Couldn't reach VitaClaw for that query — try again")
                     _state.value = _state.value.copy(bubbles = updated)
                 }
             )
