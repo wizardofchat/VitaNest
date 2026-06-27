@@ -16,8 +16,10 @@ import com.vitanest.app.data.remote.ObservationItem
 import com.vitanest.app.data.remote.PendingOfflineItem
 import com.vitanest.app.data.remote.QuotaResponse
 import com.vitanest.app.data.repository.VitaClawRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +27,12 @@ import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+private fun jobDisplayLabelForBubble(job: PendingOfflineItem): String = when {
+    job.response.isNotBlank() -> job.response
+    job.message.isNotBlank()  -> job.message
+    else                       -> "Job ${job.jobId} finished"
+}
 
 private fun parseTsToDisplay(ts: String): String {
     if (ts.isBlank()) return ""
@@ -44,7 +52,10 @@ data class BubbleMsg(
     val isLoading: Boolean  = false,
     val isQueued: Boolean   = false,
     val timeDisplay: String = "",
-    val queryProvenance: BuddieQueryProvenance? = null
+    val queryProvenance: BuddieQueryProvenance? = null,
+    val jobId: String?      = null  // report jobs only — links this bubble
+    // to an offlineJobs entry so polling
+    // can update it in place once done
 )
 
 data class BuddieUiState(
@@ -56,7 +67,9 @@ data class BuddieUiState(
     val intents: List<IntentItem>             = emptyList(),
     val bubbles: List<BubbleMsg>              = emptyList(),
     val offlineJobs: List<PendingOfflineItem> = emptyList(),
-    val observations: List<ObservationItem>   = emptyList()
+    val observations: List<ObservationItem>   = emptyList(),
+    val isSubmittingReport: Boolean           = false,
+    val reportSubmitError: String?            = null
 )
 
 class BuddieViewModel(
@@ -68,6 +81,12 @@ class BuddieViewModel(
 
     private var initialised = false
 
+    // Polling loop for offline jobs (Dolphin text + report jobs share one
+    // list). Only one loop runs at a time — started on initialise() if
+    // jobs are already pending, and (re)started whenever a new job is
+    // submitted. Self-stops once nothing is pending.
+    private var pollJob: Job? = null
+
     fun initialise(cachedBrief: BriefResponse? = null) {
         // Apply cached brief immediately — no network wait
         if (cachedBrief != null && _state.value.briefData == null) {
@@ -78,23 +97,25 @@ class BuddieViewModel(
 
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true)
+            val t0 = System.currentTimeMillis()
+            fun lap(label: String) =
+                android.util.Log.d("BuddieTiming", "$label: ${System.currentTimeMillis() - t0}ms")
 
-            // All calls in parallel — Ask screen opens as fast as the slowest single call,
-            // not the sum of all calls
+            // All six fire concurrently. isLoading flips false as soon as
+            // opening + history land (the two that gate first paint) —
+            // quota/offline/intents/observations fill in afterward without
+            // blocking the screen. TEMP: lap() logs left in to find which
+            // call is actually slow (Logcat tag "BuddieTiming") — remove
+            // once the real bottleneck is confirmed and addressed.
             coroutineScope {
-                val quotaDeferred       = async { repository.getQuota() }
-                val openingDeferred     = async { repository.getChatOpening() }
-                val historyDeferred     = async { repository.getChatHistory() }
-                val offlineDeferred     = async { repository.getChatOfflinePending() }
-                val intentsDeferred     = async { repository.getIntents() }
-                val observationsDeferred= async { repository.getTodayObservations() }
+                val quotaDeferred       = async { repository.getQuota().also { lap("quota") } }
+                val openingDeferred     = async { repository.getChatOpening().also { lap("opening") } }
+                val historyDeferred     = async { repository.getChatHistory().also { lap("history") } }
+                val offlineDeferred     = async { repository.getChatOfflinePending().also { lap("offline") } }
+                val intentsDeferred     = async { repository.getIntents().also { lap("intents") } }
+                val observationsDeferred= async { repository.getTodayObservations().also { lap("observations") } }
 
-                quotaDeferred.await().onSuccess { q ->
-                    _state.value = _state.value.copy(
-                        quotaData     = q,
-                        quotaExceeded = q.status == "quota_exceeded"
-                    )
-                }
+                // First-paint blockers — screen unblocks as soon as these two land.
                 openingDeferred.await().onSuccess { o ->
                     _state.value = _state.value.copy(opening = o)
                 }
@@ -110,6 +131,17 @@ class BuddieViewModel(
                     }
                     _state.value = _state.value.copy(bubbles = bubbles)
                 }
+                _state.value = _state.value.copy(isLoading = false)
+                lap("first-paint-unblocked")
+
+                // Background fill-ins — update state whenever they land,
+                // no longer gating the screen.
+                quotaDeferred.await().onSuccess { q ->
+                    _state.value = _state.value.copy(
+                        quotaData     = q,
+                        quotaExceeded = q.status == "quota_exceeded"
+                    )
+                }
                 offlineDeferred.await().onSuccess { p ->
                     _state.value = _state.value.copy(offlineJobs = p.jobs)
                 }
@@ -121,7 +153,57 @@ class BuddieViewModel(
                 }
             }
 
-            _state.value = _state.value.copy(isLoading = false)
+            maybeStartPolling()
+        }
+    }
+
+    // ── Offline job polling ────────────────────────────────────
+    // 4s cadence (middle of the 3-5s the backend contract suggests).
+    // Runs only while at least one job is in-flight ("queued" — the
+    // status returned on submit per the order_pnl_report contract — or
+    // "pending"); self-stops once nothing is in-flight. 60s soft timeout
+    // per overall loop run — after that we stop polling rather than spin
+    // forever (matches contract doc's guidance: no server-side timeout
+    // is enforced, so the client must own this).
+    private fun isInFlight(status: String) = status == "pending" || status == "queued"
+
+    private fun maybeStartPolling() {
+        val hasPending = _state.value.offlineJobs.any { isInFlight(it.status) }
+        if (!hasPending || pollJob?.isActive == true) return
+
+        pollJob = viewModelScope.launch {
+            var elapsedMs = 0L
+            val timeoutMs = 60_000L
+            while (elapsedMs < timeoutMs) {
+                delay(4_000L)
+                elapsedMs += 4_000L
+                repository.getChatOfflinePending().onSuccess { p ->
+                    _state.value = _state.value.copy(offlineJobs = p.jobs)
+                    syncReportBubbles(p.jobs)
+                }
+                if (_state.value.offlineJobs.none { isInFlight(it.status) }) return@launch
+            }
+        }
+    }
+
+    // Updates any chat bubble tagged with a jobId once that job's status
+    // changes — keeps the chat-window bubble in sync with the inbox row
+    // for the same job, rather than only the inbox strip reflecting it.
+    private fun syncReportBubbles(jobs: List<PendingOfflineItem>) {
+        val byId = jobs.associateBy { it.jobId }
+        val updated = _state.value.bubbles.map { bubble ->
+            val jobId = bubble.jobId ?: return@map bubble
+            val job   = byId[jobId] ?: return@map bubble
+            if (isInFlight(job.status)) return@map bubble
+            bubble.copy(
+                text      = if (job.status == "error") "Report failed — try again"
+                else jobDisplayLabelForBubble(job),
+                isQueued  = false,
+                isLoading = false
+            )
+        }
+        if (updated != _state.value.bubbles) {
+            _state.value = _state.value.copy(bubbles = updated)
         }
     }
 
@@ -205,6 +287,87 @@ class BuddieViewModel(
                 offlineJobs = _state.value.offlineJobs.filter { it.jobId != jobId }
             )
         }
+    }
+
+    // Acks every finished job at once — never an in-flight one, so a
+    // report still generating is never silently dropped by "Clear all".
+    fun clearAllOfflineJobs() {
+        val toClear = _state.value.offlineJobs.filter { !isInFlight(it.status) }
+        if (toClear.isEmpty()) return
+        viewModelScope.launch {
+            coroutineScope {
+                toClear.forEach { job -> launch { repository.ackOfflineMessage(job.jobId) } }
+            }
+            val clearedIds = toClear.map { it.jobId }.toSet()
+            _state.value = _state.value.copy(
+                offlineJobs = _state.value.offlineJobs.filterNot { it.jobId in clearedIds }
+            )
+        }
+    }
+
+    // ── Reports ─────────────────────────────────────────────────
+    // order_pnl_report is the first report type. tickers must be
+    // non-empty — mirrors the server's own 400 guard, checked here too
+    // so the failure is instant and doesn't round-trip the network.
+    fun submitReport(
+        tickers: List<String>,
+        dateFrom: String? = null,
+        dateTo: String? = null,
+        top5: Boolean = false,
+        rankBy: String = "dca"
+    ) {
+        if (tickers.isEmpty()) {
+            _state.value = _state.value.copy(reportSubmitError = "Pick at least one ticker")
+            return
+        }
+        _state.value = _state.value.copy(isSubmittingReport = true, reportSubmitError = null)
+
+        val label = if (top5) "Top 5 best/worst" else "Full export"
+        val requestSummary = "Order PnL Report — ${tickers.joinToString(", ")} — $label"
+
+        viewModelScope.launch {
+            repository.submitOfflineReport(
+                tickers  = tickers,
+                dateFrom = dateFrom,
+                dateTo   = dateTo,
+                top5     = top5,
+                rankBy   = rankBy
+            ).fold(
+                onSuccess = { resp ->
+                    val newJob = PendingOfflineItem(
+                        jobId   = resp.jobId,
+                        message = requestSummary,
+                        status  = resp.status
+                    )
+                    // Chat window: user bubble for the request, queued
+                    // buddy bubble tagged with jobId so polling can find
+                    // and update it once the report finishes.
+                    val userBubble  = BubbleMsg(role = "user", text = requestSummary)
+                    val queuedBubble = BubbleMsg(
+                        role     = "buddy",
+                        text     = "Generating report — job ${resp.jobId}…",
+                        isQueued = true,
+                        jobId    = resp.jobId
+                    )
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        offlineJobs        = _state.value.offlineJobs + newJob,
+                        bubbles            = _state.value.bubbles + userBubble + queuedBubble
+                    )
+                    maybeStartPolling()
+                },
+                onFailure = { err ->
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        reportSubmitError  = err.message ?: "Could not submit report — check Tailscale"
+                    )
+                }
+            )
+        }
+    }
+
+    fun clearReportSubmitError() {
+        _state.value = _state.value.copy(reportSubmitError = null)
     }
 
     fun refreshQuota() {

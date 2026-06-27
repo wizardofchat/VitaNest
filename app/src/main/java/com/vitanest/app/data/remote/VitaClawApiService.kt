@@ -31,12 +31,14 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 
 // ── System ────────────────────────────────────────────────────
 
@@ -200,6 +202,10 @@ data class IntentsResponse(
 )
 
 // ── Offline pending ───────────────────────────────────────────
+// Confirmed against live API (2026-06-25): /chat/offline/pending returns
+// has_file: Boolean, NOT file_path. (The original contract doc described
+// file_path on the single-job-by-id endpoint; that field is absent here.)
+// has_file is sufficient — downloading only needs job_id, not a path.
 @Serializable
 data class PendingOfflineItem(
     @SerialName("job_id")       val jobId: String,
@@ -208,13 +214,34 @@ data class PendingOfflineItem(
     val provenance: String = "",
     @SerialName("elapsed_ms")   val elapsedMs: Long = 0L,
     @SerialName("completed_at") val completedAt: String = "",
-    val status: String = ""
+    val status: String = "",
+    @SerialName("has_file")     val hasFile: Boolean = false
 )
 
 @Serializable
 data class PendingOfflineResponse(
     @SerialName("pending_count") val pendingCount: Int,
     val jobs: List<PendingOfflineItem> = emptyList()
+)
+
+// ── Offline report job (order_pnl_report — first of N future reports) ──
+// Contract: POST /chat/offline/report. No tickers means no request —
+// there is no "--all" equivalent; VitaNest must always send an explicit
+// non-empty ticker list (server returns 400 otherwise).
+@Serializable
+data class OfflineReportRequest(
+    val tickers: List<String>,
+    @SerialName("date_from") val dateFrom: String? = null,
+    @SerialName("date_to")   val dateTo: String? = null,
+    val top5: Boolean = false,
+    @SerialName("rank_by")   val rankBy: String = "dca",
+    val source: String = "vitanest"
+)
+
+@Serializable
+data class OfflineReportSubmitResponse(
+    @SerialName("job_id") val jobId: String,
+    val status: String = "queued"
 )
 
 // ── Portfolio ─────────────────────────────────────────────────
@@ -1125,6 +1152,22 @@ interface VitaClawApiService {
     suspend fun ackOfflineMessage(
         @Path("job_id") jobId: String
     ): Response<Unit>
+
+    // ── Reports (order_pnl_report is the first; same job_id/poll lifecycle
+    //    as Dolphin chat jobs above, extended with a downloadable file) ──
+
+    @POST("chat/offline/report")
+    suspend fun submitOfflineReport(
+        @Body request: OfflineReportRequest
+    ): Response<OfflineReportSubmitResponse>
+
+    // Raw bytes — caller must check PendingOfflineItem.hasFile before
+    // calling this; check PendingOfflineItem.hasFile first, a 404 here
+    @Streaming
+    @GET("chat/offline/job/{job_id}/file")
+    suspend fun downloadOfflineJobFile(
+        @Path("job_id") jobId: String
+    ): Response<ResponseBody>
 
     @GET("intents")
     suspend fun getIntents(): Response<IntentsResponse>

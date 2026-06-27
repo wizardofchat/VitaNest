@@ -38,6 +38,8 @@ import com.vitanest.app.data.remote.IncomeStressRequest
 import com.vitanest.app.data.remote.IncomeStressResponse
 import com.vitanest.app.data.remote.IntentsResponse
 import com.vitanest.app.data.remote.ObservationsResponse
+import com.vitanest.app.data.remote.OfflineReportRequest
+import com.vitanest.app.data.remote.OfflineReportSubmitResponse
 import com.vitanest.app.data.remote.OrdersSummaryResponse
 import com.vitanest.app.data.remote.PendingOfflineResponse
 import com.vitanest.app.data.remote.PiesResponse
@@ -157,6 +159,55 @@ open class VitaClawRepository {
             val r = apiService.ackOfflineMessage(jobId)
             if (r.isSuccessful) Result.success(Unit)
             else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Reports ───────────────────────────────────────────────
+    // order_pnl_report is the first report type. Submission flows through
+    // the same job_id/poll lifecycle as Dolphin chat jobs — see
+    // getChatOfflinePending() above, which returns both job kinds in one
+    // list. tickers must be non-empty — no "--all", confirmed deliberate
+    // server-side (order_pnl_report VitaNest Integration Contract).
+
+    open suspend fun submitOfflineReport(
+        tickers: List<String>,
+        dateFrom: String? = null,
+        dateTo: String? = null,
+        top5: Boolean = false,
+        rankBy: String = "dca"
+    ): Result<OfflineReportSubmitResponse> {
+        return try {
+            val r = apiService.submitOfflineReport(
+                OfflineReportRequest(
+                    tickers  = tickers,
+                    dateFrom = dateFrom,
+                    dateTo   = dateTo,
+                    top5     = top5,
+                    rankBy   = rankBy
+                )
+            )
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /chat/offline/report"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // Returns raw .xlsx bytes. Caller (UI layer) must confirm
+    // PendingOfflineItem.hasFile is true before calling this — file_path
+    // can be null even at status == "done", and a 404 here means the job
+    // has no associated file or it no longer exists on disk.
+    open suspend fun downloadOfflineJobFile(jobId: String): Result<ByteArray> {
+        return try {
+            val r = apiService.downloadOfflineJobFile(jobId)
+            if (r.isSuccessful) {
+                val bytes = r.body()?.bytes()
+                if (bytes != null) Result.success(bytes)
+                else Result.failure(Exception("Empty file response for job $jobId"))
+            } else if (r.code() == 404) {
+                Result.failure(Exception("Report file not found — job may have no file or it was removed"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }
 

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -78,12 +79,13 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
-private enum class ChatMode { AUTO, OFFLINE, QUERY }
+private enum class ChatMode { AUTO, OFFLINE, QUERY, REPORT }
 private enum class BuddieSubTab { CHAT, TRADE, OBSERVATIONS }
 
 private val BuddyGreen  = Color(0xFF2D6A4F)
 private val AmberDash   = Color(0xFFF59E0B)
 private val QueryBlue   = Color(0xFF1D4ED8)
+private val ReportPurple= Color(0xFF7C3AED)
 private val ErrorRed    = Color(0xFFC0392B)
 private val ConfGreen   = Color(0xFF3B6D11)
 private val ConfAmber   = Color(0xFFBA7517)
@@ -439,6 +441,31 @@ private fun PlaceholderTabContent(label: String) {
 // ── Chat sub-tab ────────────────────────────────────────────────
 // Lifted from AskScreen.kt verbatim (header/nav stripped — shell owns those).
 // Observations strip removed — relocated to its own sub-tab, not duplicated here.
+
+// ── Report definitions ───────────────────────────────────────────
+// One entry per report type. Only "Order PnL Report" is live — adding
+// report #2 means adding a new ReportKind + a params block in the
+// Report mode UI below, not a new screen or new job-polling logic
+// (that's all generic — see OfflineInbox / OfflineJobRow further down).
+private enum class ReportKind { ORDER_PNL }
+
+private data class ReportDefinition(
+    val kind: ReportKind,
+    val title: String,
+    val description: String,
+    val available: Boolean = true
+)
+
+private val REPORT_DEFINITIONS = listOf(
+    ReportDefinition(
+        kind        = ReportKind.ORDER_PNL,
+        title       = "Order PnL Report",
+        description = "Per-order profit/loss across tickers"
+    )
+    // Future reports append here, e.g.:
+    // ReportDefinition(ReportKind.DIVIDEND_SUMMARY, "Dividend Summary", "...", available = false)
+)
+
 @Composable
 private fun ChatTabContent(
     navController: NavController,
@@ -457,6 +484,13 @@ private fun ChatTabContent(
     var quotaExpanded by remember { mutableStateOf(false) }
     var inboxExpanded by remember { mutableStateOf(false) }
     var isSending     by remember { mutableStateOf(false) }
+
+    // ── Report mode state ──────────────────────────────────────
+    // Hardcoded ticker chips for the first build (per "prove the pipe
+    // works" decision) — real ticker picker is a follow-up, not this pass.
+    var selectedReport   by remember { mutableStateOf(REPORT_DEFINITIONS.first()) }
+    var selectedTickers  by remember { mutableStateOf(setOf("JEPQ", "QYLP")) }
+    var reportTop5       by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.bubbles.size) {
         if (state.bubbles.isNotEmpty()) {
@@ -503,10 +537,24 @@ private fun ChatTabContent(
                 expanded   = inboxExpanded,
                 onToggle   = { inboxExpanded = !inboxExpanded },
                 onDownload = { job ->
-                    downloadJobAsText(context, job)
-                    viewModel.ackOfflineJob(job.jobId)
+                    if (job.hasFile) {
+                        // File jobs: Download is silent save, job stays in
+                        // the list so Share is still available afterward.
+                        downloadJobFile(context, scope, repository, job)
+                    } else {
+                        // Text jobs: unchanged one-tap save+share+dismiss.
+                        downloadJobAsText(context, job)
+                        viewModel.ackOfflineJob(job.jobId)
+                    }
                 },
-                onDismiss  = { job -> viewModel.ackOfflineJob(job.jobId) }
+                onShare    = { job ->
+                    if (job.hasFile) {
+                        shareJobFile(context, scope, repository, job)
+                        viewModel.ackOfflineJob(job.jobId)
+                    }
+                },
+                onDismiss  = { job -> viewModel.ackOfflineJob(job.jobId) },
+                onClearAll = { viewModel.clearAllOfflineJobs() }
             )
         }
 
@@ -552,15 +600,24 @@ private fun ChatTabContent(
                 items(state.bubbles) { b ->
                     when (b.role) {
                         "user"  -> UserBubble(b.text, b.timeDisplay)
-                        "buddy" -> BuddyBubble(
-                            text        = b.text,
-                            provenance  = b.provenance,
-                            elapsedMs   = b.elapsedMs,
-                            isLoading   = b.isLoading,
-                            isQueued    = b.isQueued,
-                            timeDisplay = b.timeDisplay,
-                            queryProvenance = b.queryProvenance
-                        )
+                        "buddy" -> {
+                            val linkedJob = b.jobId?.let { id -> state.offlineJobs.find { it.jobId == id } }
+                            BuddyBubble(
+                                text        = b.text,
+                                provenance  = b.provenance,
+                                elapsedMs   = b.elapsedMs,
+                                isLoading   = b.isLoading,
+                                isQueued    = b.isQueued,
+                                timeDisplay = b.timeDisplay,
+                                queryProvenance = b.queryProvenance,
+                                reportJob   = linkedJob,
+                                onDownloadReport = { job -> downloadJobFile(context, scope, repository, job) },
+                                onShareReport    = { job ->
+                                    shareJobFile(context, scope, repository, job)
+                                    viewModel.ackOfflineJob(job.jobId)
+                                }
+                            )
+                        }
                         else -> SystemCard(b.text)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -608,71 +665,87 @@ private fun ChatTabContent(
                 .padding(horizontal = T.screenPadding, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            OutlinedTextField(
-                value         = inputText,
-                onValueChange = { inputText = it },
-                placeholder   = {
-                    Text(
-                        text      = if (state.quotaExceeded) "Quota exceeded"
-                        else when (chatMode) {
-                            ChatMode.OFFLINE -> "Offline prompt…"
-                            ChatMode.QUERY   -> "Ask about your finance data…"
-                            else             -> "Ask Buddy…"
+            if (chatMode == ChatMode.REPORT) {
+                ReportParamsPanel(
+                    report          = selectedReport,
+                    selectedTickers = selectedTickers,
+                    onAddTicker     = { t -> if (t.isNotBlank()) selectedTickers = selectedTickers + t },
+                    onRemoveTicker  = { t -> selectedTickers = selectedTickers - t },
+                    top5            = reportTop5,
+                    onTop5Change    = { reportTop5 = it },
+                    isSubmitting    = state.isSubmittingReport,
+                    submitError     = state.reportSubmitError,
+                    onDismissError  = { viewModel.clearReportSubmitError() }
+                )
+            } else {
+                OutlinedTextField(
+                    value         = inputText,
+                    onValueChange = { inputText = it },
+                    placeholder   = {
+                        Text(
+                            text      = if (state.quotaExceeded) "Quota exceeded"
+                            else when (chatMode) {
+                                ChatMode.OFFLINE -> "Offline prompt…"
+                                ChatMode.QUERY   -> "Ask about your finance data…"
+                                else             -> "Ask Buddy…"
+                            },
+                            style     = T.meta,
+                            fontStyle = FontStyle.Italic
+                        )
+                    },
+                    enabled         = (chatMode == ChatMode.QUERY || !state.quotaExceeded) && !isSending,
+                    singleLine      = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendMessage() }),
+                    colors          = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = when (chatMode) {
+                            ChatMode.OFFLINE -> AmberDash
+                            ChatMode.QUERY   -> QueryBlue
+                            else             -> T.Ink
                         },
-                        style     = T.meta,
-                        fontStyle = FontStyle.Italic
-                    )
-                },
-                enabled         = (chatMode == ChatMode.QUERY || !state.quotaExceeded) && !isSending,
-                singleLine      = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { sendMessage() }),
-                colors          = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor   = when (chatMode) {
-                        ChatMode.OFFLINE -> AmberDash
-                        ChatMode.QUERY   -> QueryBlue
-                        else             -> T.Ink
-                    },
-                    unfocusedBorderColor = when (chatMode) {
-                        ChatMode.OFFLINE -> AmberDash.copy(alpha = 0.5f)
-                        ChatMode.QUERY   -> QueryBlue.copy(alpha = 0.5f)
-                        else             -> T.Rule
-                    },
-                    focusedTextColor     = T.Ink,
-                    unfocusedTextColor   = T.Ink,
-                    cursorColor          = T.Ink,
-                    disabledBorderColor  = T.Rule,
-                    disabledTextColor    = T.Muted
-                ),
-                textStyle = T.meta,
-                modifier  = Modifier.fillMaxWidth()
-            )
+                        unfocusedBorderColor = when (chatMode) {
+                            ChatMode.OFFLINE -> AmberDash.copy(alpha = 0.5f)
+                            ChatMode.QUERY   -> QueryBlue.copy(alpha = 0.5f)
+                            else             -> T.Rule
+                        },
+                        focusedTextColor     = T.Ink,
+                        unfocusedTextColor   = T.Ink,
+                        cursorColor          = T.Ink,
+                        disabledBorderColor  = T.Rule,
+                        disabledTextColor    = T.Muted
+                    ),
+                    textStyle = T.meta,
+                    modifier  = Modifier.fillMaxWidth()
+                )
+            }
 
             Row(
                 modifier              = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                // File upload
-                OutlinedButton(
-                    onClick        = { filePicker.launch(arrayOf("text/plain", "text/*")) },
-                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                    shape          = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                    modifier       = Modifier.height(36.dp)
-                ) {
-                    Text(text = "File", fontSize = 11.sp, color = T.Muted)
-                }
+                if (chatMode != ChatMode.REPORT) {
+                    // File upload
+                    OutlinedButton(
+                        onClick        = { filePicker.launch(arrayOf("text/plain", "text/*")) },
+                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier       = Modifier.height(36.dp)
+                    ) {
+                        Text(text = "File", fontSize = 11.sp, color = T.Muted)
+                    }
 
-                // Clear chat
-                OutlinedButton(
-                    onClick        = { viewModel.clearChat() },
-                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                    shape          = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                    modifier       = Modifier.height(36.dp)
-                ) {
-                    Text(text = "Clear", fontSize = 11.sp, color = T.Muted)
+                    // Clear chat
+                    OutlinedButton(
+                        onClick        = { viewModel.clearChat() },
+                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier       = Modifier.height(36.dp)
+                    ) {
+                        Text(text = "Clear", fontSize = 11.sp, color = T.Muted)
+                    }
                 }
 
                 // Mode dropdown
@@ -688,12 +761,14 @@ private fun ChatTabContent(
                             text     = when (chatMode) {
                                 ChatMode.OFFLINE -> "Offline"
                                 ChatMode.QUERY   -> "NLP Query"
+                                ChatMode.REPORT  -> "Report"
                                 else             -> "Auto"
                             },
                             fontSize = 11.sp,
                             color    = when (chatMode) {
                                 ChatMode.OFFLINE -> AmberDash
                                 ChatMode.QUERY   -> QueryBlue
+                                ChatMode.REPORT  -> ReportPurple
                                 else             -> T.Ink
                             }
                         )
@@ -717,6 +792,10 @@ private fun ChatTabContent(
                             onClick = { chatMode = ChatMode.QUERY; modeExpanded = false }
                         )
                         DropdownMenuItem(
+                            text    = { Text("Report — ${selectedReport.title}", style = T.meta) },
+                            onClick = { chatMode = ChatMode.REPORT; modeExpanded = false }
+                        )
+                        DropdownMenuItem(
                             enabled = false,
                             text    = { Text("Council — coming soon", style = T.meta, color = T.Muted) },
                             onClick = {}
@@ -724,15 +803,28 @@ private fun ChatTabContent(
                     }
                 }
 
-                // Send / Queue
+                // Send / Queue / Generate
                 Button(
-                    onClick        = { sendMessage() },
-                    enabled        = inputText.trim().isNotEmpty() && !isSending &&
-                            (chatMode == ChatMode.QUERY || !state.quotaExceeded),
+                    onClick        = {
+                        if (chatMode == ChatMode.REPORT) {
+                            viewModel.submitReport(
+                                tickers = selectedTickers.toList(),
+                                top5    = reportTop5
+                            )
+                        } else {
+                            sendMessage()
+                        }
+                    },
+                    enabled        = if (chatMode == ChatMode.REPORT)
+                        selectedTickers.isNotEmpty() && !state.isSubmittingReport
+                    else
+                        inputText.trim().isNotEmpty() && !isSending &&
+                                (chatMode == ChatMode.QUERY || !state.quotaExceeded),
                     colors         = ButtonDefaults.buttonColors(
                         containerColor         = when (chatMode) {
                             ChatMode.OFFLINE -> AmberDash
                             ChatMode.QUERY   -> QueryBlue
+                            ChatMode.REPORT  -> ReportPurple
                             else             -> T.Ink
                         },
                         contentColor           = T.Paper,
@@ -744,11 +836,190 @@ private fun ChatTabContent(
                     modifier       = Modifier.height(36.dp)
                 ) {
                     Text(
-                        text       = if (chatMode == ChatMode.OFFLINE) "Queue" else "Send",
+                        text       = when (chatMode) {
+                            ChatMode.OFFLINE -> "Queue"
+                            ChatMode.REPORT  -> if (state.isSubmittingReport) "..." else "Generate"
+                            else             -> "Send"
+                        },
                         fontSize   = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
+            }
+        }
+    }
+}
+
+// ── Report params panel ──────────────────────────────────────────
+// Renders in place of the free-text input when chatMode == REPORT.
+// Param fields shown here are specific to ORDER_PNL today; a future
+// report with different params (e.g. just a date range, no tickers)
+// would branch on report.kind here rather than needing a new screen.
+@Composable
+private fun ReportParamsPanel(
+    report: ReportDefinition,
+    selectedTickers: Set<String>,
+    onAddTicker: (String) -> Unit,
+    onRemoveTicker: (String) -> Unit,
+    top5: Boolean,
+    onTop5Change: (Boolean) -> Unit,
+    isSubmitting: Boolean,
+    submitError: String?,
+    onDismissError: () -> Unit
+) {
+    var tickerInput by remember { mutableStateOf("") }
+    var collapsed   by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.5.dp, ReportPurple.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+            .animateContentSize()
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .clickable { collapsed = !collapsed },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(text = report.title, style = T.sectionHead, color = ReportPurple)
+            Text(
+                text  = if (collapsed)
+                    "${selectedTickers.size} ticker${if (selectedTickers.size == 1) "" else "s"} · ${if (top5) "Top 5" else "Full"}  ▾"
+                else "▴",
+                fontSize = 10.sp,
+                color    = T.Muted
+            )
+        }
+
+        if (collapsed) return@Column
+
+        if (submitError != null) {
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(text = submitError, style = T.meta, color = ErrorRed)
+                TextButton(onClick = onDismissError, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                    Text(text = "Dismiss", fontSize = 10.sp, color = T.Muted)
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text       = "TICKERS",
+                fontSize   = 9.sp,
+                color      = T.Muted,
+                fontWeight = FontWeight.Medium
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier              = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                selectedTickers.forEach { ticker ->
+                    FilterChip(
+                        selected = true,
+                        onClick  = { onRemoveTicker(ticker) },
+                        label    = { Text(text = "$ticker ✕", fontSize = 11.sp) },
+                        colors   = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ReportPurple.copy(alpha = 0.15f),
+                            selectedLabelColor     = ReportPurple
+                        )
+                    )
+                }
+            }
+            // Free-text add — validates format only (uppercase letters,
+            // 1-6 chars), no backend lookup. Tapping an existing chip
+            // removes it (✕ above), so this is the only way to add.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value         = tickerInput,
+                    onValueChange = { tickerInput = it.uppercase().filter { c -> c.isLetter() }.take(6) },
+                    placeholder   = { Text("Add ticker…", style = T.meta, fontStyle = FontStyle.Italic) },
+                    singleLine    = true,
+                    textStyle     = T.meta,
+                    colors        = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = ReportPurple,
+                        unfocusedBorderColor = ReportPurple.copy(alpha = 0.4f)
+                    ),
+                    modifier      = Modifier.weight(1f).height(48.dp)
+                )
+                OutlinedButton(
+                    onClick = {
+                        if (tickerInput.isNotBlank()) {
+                            onAddTicker(tickerInput)
+                            tickerInput = ""
+                        }
+                    },
+                    enabled        = tickerInput.isNotBlank(),
+                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier       = Modifier.height(36.dp)
+                ) {
+                    Text(text = "Add", fontSize = 11.sp, color = ReportPurple)
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text       = "MODE",
+                fontSize   = 9.sp,
+                color      = T.Muted,
+                fontWeight = FontWeight.Medium
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(T.Rule.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                    .padding(3.dp)
+            ) {
+                listOf(false, true).forEach { isTop5 ->
+                    val active = top5 == isTop5
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onTop5Change(isTop5) }
+                            .background(
+                                if (active) T.Paper else Color.Transparent,
+                                RoundedCornerShape(6.dp)
+                            )
+                            .padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text       = if (isTop5) "Top 5 best/worst" else "Full export",
+                            fontSize   = 10.sp,
+                            fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                            color      = if (active) T.Ink else T.Muted
+                        )
+                    }
+                }
+            }
+        }
+
+        if (isSubmitting) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    color       = ReportPurple,
+                    strokeWidth = 1.5.dp,
+                    modifier    = Modifier.size(14.dp)
+                )
+                Text(text = "Submitting…", style = T.meta, color = T.Muted)
             }
         }
     }
@@ -2342,20 +2613,25 @@ private fun OfflineInbox(
     expanded: Boolean,
     onToggle: () -> Unit,
     onDownload: (PendingOfflineItem) -> Unit,
-    onDismiss: (PendingOfflineItem) -> Unit
+    onShare: (PendingOfflineItem) -> Unit,
+    onDismiss: (PendingOfflineItem) -> Unit,
+    onClearAll: () -> Unit
 ) {
     val doneCount  = jobs.count { it.status == "done" }
     val errorCount = jobs.count { it.status == "error" }
+    // Only clear jobs that are actually finished — never silently drop
+    // something still generating just because "Clear all" was tapped.
+    val clearableCount = jobs.count { it.status != "pending" && it.status != "queued" }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFFFFF8E7))
-            .clickable(onClick = onToggle)
             .animateContentSize()
     ) {
         Row(
             modifier              = Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onToggle)
                 .padding(horizontal = T.screenPadding, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically
@@ -2382,26 +2658,77 @@ private fun OfflineInbox(
                     }
                 }
             }
-            Text(text = if (expanded) "▲" else "▼", style = T.meta, color = T.Muted)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                if (expanded && clearableCount > 0) {
+                    Text(
+                        text     = "Clear all",
+                        fontSize = 11.sp,
+                        color    = T.Muted,
+                        modifier = Modifier.clickable(onClick = onClearAll)
+                    )
+                }
+                Text(
+                    text     = if (expanded) "▲" else "▼",
+                    style    = T.meta,
+                    color    = T.Muted,
+                    modifier = Modifier.clickable(onClick = onToggle)
+                )
+            }
         }
         if (expanded) {
             HorizontalDivider(thickness = T.ruleThickness, color = AmberDash.copy(alpha = 0.3f))
-            jobs.forEach { job ->
-                OfflineJobRow(job = job, onDownload = { onDownload(job) }, onDismiss = { onDismiss(job) })
-                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+            // Height-capped + scrollable — was an unbounded Column.forEach,
+            // which is why the list grew past the screen with no way to
+            // scroll through older entries.
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 280.dp)
+            ) {
+                items(jobs, key = { it.jobId }) { job ->
+                    OfflineJobRow(
+                        job        = job,
+                        onDownload = { onDownload(job) },
+                        onShare    = { onShare(job) },
+                        onDismiss  = { onDismiss(job) }
+                    )
+                    HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                }
             }
         }
     }
 }
 
+// ── Job display label ────────────────────────────────────────
+// Server-side report jobs leave message blank (confirmed 2026-06-25 —
+// every order_pnl_report entry in /chat/offline/pending has message: "").
+// Fall back to response, which report jobs always populate with a real
+// summary ("PnL report ready -- 196 order rows..."); generic fallback
+// only if somehow both are empty.
+private fun jobDisplayLabel(job: PendingOfflineItem): String = when {
+    job.message.isNotBlank()  -> job.message
+    job.response.isNotBlank() -> job.response
+    else                       -> "Offline job — ${job.jobId}"
+}
+
 // ── Offline job row ───────────────────────────────────────────
+// Three states per job:
+//   pending           → spinner, no actions yet
+//   done, no file     → legacy text job, single "Save" button (download+share in one tap)
+//   done, hasFile     → report job, two buttons: "Download" (silent) + "Share" (explicit)
+//   error             → "Dismiss" only
 @Composable
 private fun OfflineJobRow(
     job: PendingOfflineItem,
     onDownload: () -> Unit,
+    onShare: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val isError = job.status == "error"
+    val isError   = job.status == "error"
+    val isPending = job.status == "pending" || job.status == "queued"
     Row(
         modifier              = Modifier
             .fillMaxWidth()
@@ -2411,32 +2738,68 @@ private fun OfflineJobRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text       = job.message,
+                text       = jobDisplayLabel(job),
                 fontSize   = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color      = if (isError) T.Muted else T.Ink,
                 maxLines   = 1
             )
             Text(
-                text  = if (isError) "Failed" else job.provenance,
+                text  = when {
+                    isError   -> "Failed"
+                    isPending -> "Generating…"
+                    else      -> job.provenance
+                },
                 style = T.meta,
                 color = if (isError) ErrorRed else T.Muted
             )
         }
         Spacer(modifier = Modifier.width(8.dp))
-        if (isError) {
-            TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                Text(text = "Dismiss", fontSize = 11.sp, color = T.Muted)
+        when {
+            isError -> {
+                TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text(text = "Dismiss", fontSize = 11.sp, color = T.Muted)
+                }
             }
-        } else {
-            Button(
-                onClick        = onDownload,
-                colors         = ButtonDefaults.buttonColors(containerColor = T.Ink, contentColor = T.Paper),
-                shape          = RoundedCornerShape(4.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp),
-                modifier       = Modifier.height(32.dp)
-            ) {
-                Text(text = "Save", fontSize = 11.sp)
+            isPending -> {
+                CircularProgressIndicator(
+                    color       = T.Muted,
+                    strokeWidth = 1.5.dp,
+                    modifier    = Modifier.size(16.dp)
+                )
+            }
+            job.hasFile -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick        = onDownload,
+                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier       = Modifier.height(32.dp)
+                    ) {
+                        Text(text = "Download", fontSize = 11.sp, color = T.Ink)
+                    }
+                    Button(
+                        onClick        = onShare,
+                        colors         = ButtonDefaults.buttonColors(containerColor = T.Ink, contentColor = T.Paper),
+                        shape          = RoundedCornerShape(4.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp),
+                        modifier       = Modifier.height(32.dp)
+                    ) {
+                        Text(text = "Share", fontSize = 11.sp)
+                    }
+                }
+            }
+            else -> {
+                Button(
+                    onClick        = onDownload,
+                    colors         = ButtonDefaults.buttonColors(containerColor = T.Ink, contentColor = T.Paper),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier       = Modifier.height(32.dp)
+                ) {
+                    Text(text = "Save", fontSize = 11.sp)
+                }
             }
         }
     }
@@ -2479,6 +2842,97 @@ private fun readTextFile(context: Context, uri: Uri): String {
             BufferedReader(InputStreamReader(stream)).readText()
         } ?: ""
     } catch (e: Exception) { "" }
+}
+
+// ── Report file download (binary .xlsx) ────────────────────────
+// Saves to the public Downloads folder via MediaStore so the file shows
+// up in the phone's Files app / Downloads, not just inside VitaNest.
+// MediaStore.Downloads requires API 29+ — VitaNest's minSdk is 29, so no
+// legacy fallback branch needed here.
+private fun reportFileName(job: PendingOfflineItem): String {
+    // No file_path string is returned by /chat/offline/pending (confirmed
+    // 2026-06-25 — only has_file: Boolean is present). Name from job_id
+    // instead; the actual bytes come from GET .../job/{job_id}/file
+    // regardless of what we call the saved local copy.
+    return "vitaclaw_report_${job.jobId}.xlsx"
+}
+
+private suspend fun saveReportFileToDownloads(
+    context: Context,
+    repository: VitaClawRepository,
+    job: PendingOfflineItem
+): Uri? {
+    val bytesResult = repository.downloadOfflineJobFile(job.jobId)
+    val bytes = bytesResult.getOrNull() ?: return null
+
+    val fileName = reportFileName(job)
+    val mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    return try {
+        val contentValues = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+            put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val resolver  = context.contentResolver
+        val targetUri = resolver.insert(
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            contentValues
+        ) ?: return null
+
+        resolver.openOutputStream(targetUri)?.use { out -> out.write(bytes) }
+
+        contentValues.clear()
+        contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(targetUri, contentValues, null, null)
+
+        targetUri
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
+// "Download" — silent save, no share sheet. Toast confirms success/failure
+// since there's otherwise no feedback the file actually landed.
+private fun downloadJobFile(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    repository: VitaClawRepository,
+    job: PendingOfflineItem
+) {
+    scope.launch {
+        val uri = saveReportFileToDownloads(context, repository, job)
+        val message = if (uri != null) "Saved to Downloads — ${reportFileName(job)}"
+        else "Couldn't save report — try again"
+        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
+// "Share" — saves (if not already reachable) then opens the share sheet
+// with the file attached, same UX shape as the existing text-job "Save".
+private fun shareJobFile(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    repository: VitaClawRepository,
+    job: PendingOfflineItem
+) {
+    scope.launch {
+        val uri = saveReportFileToDownloads(context, repository, job)
+        if (uri == null) {
+            android.widget.Toast.makeText(
+                context, "Couldn't prepare report for sharing — try again", android.widget.Toast.LENGTH_LONG
+            ).show()
+            return@launch
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, job.message.take(60))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share report"))
+    }
 }
 
 // ── Brief card ────────────────────────────────────────────────
@@ -2589,7 +3043,10 @@ private fun BuddyBubble(
     isLoading: Boolean  = false,
     isQueued: Boolean   = false,
     timeDisplay: String = "",
-    queryProvenance: BuddieQueryProvenance? = null
+    queryProvenance: BuddieQueryProvenance? = null,
+    reportJob: PendingOfflineItem? = null,
+    onDownloadReport: (PendingOfflineItem) -> Unit = {},
+    onShareReport: (PendingOfflineItem) -> Unit = {}
 ) {
     val clipboard = LocalClipboardManager.current
     val haptic    = LocalHapticFeedback.current
@@ -2671,6 +3128,29 @@ private fun BuddyBubble(
             if (parts.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(text = parts.joinToString(" · "), style = T.meta, color = T.Muted, fontSize = 10.sp)
+            }
+        }
+        if (reportJob != null && reportJob.hasFile) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(
+                    onClick        = { onDownloadReport(reportJob) },
+                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier       = Modifier.height(32.dp)
+                ) {
+                    Text(text = "Download", fontSize = 11.sp, color = T.Ink)
+                }
+                Button(
+                    onClick        = { onShareReport(reportJob) },
+                    colors         = ButtonDefaults.buttonColors(containerColor = T.Ink, contentColor = T.Paper),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier       = Modifier.height(32.dp)
+                ) {
+                    Text(text = "Share", fontSize = 11.sp)
+                }
             }
         }
         if (!isLoading && queryProvenance != null) {
