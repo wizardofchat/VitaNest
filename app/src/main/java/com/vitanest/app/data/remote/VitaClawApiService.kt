@@ -244,6 +244,28 @@ data class OfflineReportSubmitResponse(
     val status: String = "queued"
 )
 
+// ── Offline health report job (whoop_health_report — second report type) ──
+// Contract: POST /chat/offline/health-report. No tickers — this report has
+// a disjoint param shape from order_pnl_report (date range + detail dates +
+// output formats, no tickers at all). detailDates defaults server-side to
+// "most recent day" when omitted.
+//
+// formats is sent but VitaNest only ever surfaces the single "preferred"
+// file from the response (file_path) — the backend's generic
+// /chat/offline/job/{id}/file endpoint can only serve one file per job
+// today, even when both xlsx+pdf were generated (file_paths has both, but
+// there's no way to pick which via this endpoint yet). Requesting both
+// formats is harmless server-side; VitaNest just won't expose a second
+// download button until the backend adds per-format selection.
+@Serializable
+data class OfflineHealthReportRequest(
+    @SerialName("date_from")    val dateFrom: String? = null,
+    @SerialName("date_to")      val dateTo: String? = null,
+    @SerialName("detail_dates") val detailDates: List<String>? = null,
+    val formats: List<String> = listOf("xlsx", "pdf"),
+    val source: String = "vitanest"
+)
+
 // ── Portfolio ─────────────────────────────────────────────────
 
 @Serializable
@@ -1153,16 +1175,22 @@ interface VitaClawApiService {
         @Path("job_id") jobId: String
     ): Response<Unit>
 
-    // ── Reports (order_pnl_report is the first; same job_id/poll lifecycle
-    //    as Dolphin chat jobs above, extended with a downloadable file) ──
+    // ── Reports (order_pnl_report + whoop_health_report. Both share the
+    //    same job_id/poll lifecycle as Dolphin chat jobs above, extended
+    //    with a downloadable file via the one generic /file endpoint) ──
 
     @POST("chat/offline/report")
     suspend fun submitOfflineReport(
         @Body request: OfflineReportRequest
     ): Response<OfflineReportSubmitResponse>
 
-    // Raw bytes — caller must check PendingOfflineItem.hasFile before
-    // calling this; check PendingOfflineItem.hasFile first, a 404 here
+    @POST("chat/offline/health-report")
+    suspend fun submitOfflineHealthReport(
+        @Body request: OfflineHealthReportRequest
+    ): Response<OfflineReportSubmitResponse>
+
+    // Raw bytes — check PendingOfflineItem.hasFile first; a 404 here
+    // means the job has no file or it no longer exists on disk.
     @Streaming
     @GET("chat/offline/job/{job_id}/file")
     suspend fun downloadOfflineJobFile(

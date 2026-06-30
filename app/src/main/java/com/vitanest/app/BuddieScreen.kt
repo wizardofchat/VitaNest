@@ -40,6 +40,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.Alignment
@@ -274,6 +277,21 @@ fun BuddieScreen(
 
     LaunchedEffect(Unit) { viewModel.initialise() }
 
+    // Safety net for the 2026-06-30 stuck-polling bug: if backgrounding
+    // the app suspended the poll loop and a report job's status update
+    // was missed, resuming the app re-checks and restarts polling rather
+    // than requiring a full force-close + reopen to recover.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.resumePollingIfNeeded()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Red-dot source data — cheap derivation from already-loaded state.
     // Trade dot: any trade awaiting Bought/Skipped decision this month, either track.
     // Observations dot: any observation not yet rated useful/wrong/important.
@@ -443,11 +461,11 @@ private fun PlaceholderTabContent(label: String) {
 // Observations strip removed — relocated to its own sub-tab, not duplicated here.
 
 // ── Report definitions ───────────────────────────────────────────
-// One entry per report type. Only "Order PnL Report" is live — adding
-// report #2 means adding a new ReportKind + a params block in the
-// Report mode UI below, not a new screen or new job-polling logic
+// One entry per report type. Adding report #3 means: a new ReportKind +
+// a new entry here + a new *FormState subtype + a new *ParamsBody
+// composable (see below) — never a new screen or new job-polling logic
 // (that's all generic — see OfflineInbox / OfflineJobRow further down).
-private enum class ReportKind { ORDER_PNL }
+private enum class ReportKind { ORDER_PNL, HEALTH_REPORT }
 
 private data class ReportDefinition(
     val kind: ReportKind,
@@ -461,10 +479,41 @@ private val REPORT_DEFINITIONS = listOf(
         kind        = ReportKind.ORDER_PNL,
         title       = "Order PnL Report",
         description = "Per-order profit/loss across tickers"
+    ),
+    ReportDefinition(
+        kind        = ReportKind.HEALTH_REPORT,
+        title       = "Health Report",
+        description = "Whoop recovery, sleep & strain summary"
     )
-    // Future reports append here, e.g.:
-    // ReportDefinition(ReportKind.DIVIDEND_SUMMARY, "Dividend Summary", "...", available = false)
 )
+
+// Per-report params, one subtype per ReportKind. ChatTabContent holds a
+// single `var formState: ReportFormState` and swaps the instance when the
+// user picks a different report from the dropdown — ReportParamsPanel
+// dispatches to the matching *ParamsBody based on which subtype it is.
+private sealed class ReportFormState {
+    data class OrderPnl(
+        val selectedTickers: Set<String> = setOf("JEPQ", "QYLP"),
+        val top5: Boolean = false
+    ) : ReportFormState()
+
+    data class HealthReport(
+        val dateFrom: String? = null,
+        val dateTo: String? = null,
+        val detailDates: List<String> = emptyList()
+    ) : ReportFormState() {
+        companion object {
+            // 1st of current month through today — actually sent if the
+            // user doesn't change the fields, not just a placeholder.
+            fun defaultCurrentMonth(): HealthReport {
+                val today     = LocalDate.now()
+                val firstDay  = today.withDayOfMonth(1)
+                val fmt       = DateTimeFormatter.ISO_LOCAL_DATE
+                return HealthReport(dateFrom = firstDay.format(fmt), dateTo = today.format(fmt))
+            }
+        }
+    }
+}
 
 @Composable
 private fun ChatTabContent(
@@ -486,11 +535,13 @@ private fun ChatTabContent(
     var isSending     by remember { mutableStateOf(false) }
 
     // ── Report mode state ──────────────────────────────────────
-    // Hardcoded ticker chips for the first build (per "prove the pipe
-    // works" decision) — real ticker picker is a follow-up, not this pass.
-    var selectedReport   by remember { mutableStateOf(REPORT_DEFINITIONS.first()) }
-    var selectedTickers  by remember { mutableStateOf(setOf("JEPQ", "QYLP")) }
-    var reportTop5       by remember { mutableStateOf(false) }
+    // formState holds whichever report's own params are active — swaps
+    // to the matching default whenever a different report is picked from
+    // the dropdown (see the dropdown's onClick handlers further below).
+    var selectedReport by remember { mutableStateOf(REPORT_DEFINITIONS.first()) }
+    var formState: ReportFormState by remember {
+        mutableStateOf(ReportFormState.OrderPnl())
+    }
 
     LaunchedEffect(state.bubbles.size) {
         if (state.bubbles.isNotEmpty()) {
@@ -667,15 +718,12 @@ private fun ChatTabContent(
         ) {
             if (chatMode == ChatMode.REPORT) {
                 ReportParamsPanel(
-                    report          = selectedReport,
-                    selectedTickers = selectedTickers,
-                    onAddTicker     = { t -> if (t.isNotBlank()) selectedTickers = selectedTickers + t },
-                    onRemoveTicker  = { t -> selectedTickers = selectedTickers - t },
-                    top5            = reportTop5,
-                    onTop5Change    = { reportTop5 = it },
-                    isSubmitting    = state.isSubmittingReport,
-                    submitError     = state.reportSubmitError,
-                    onDismissError  = { viewModel.clearReportSubmitError() }
+                    report             = selectedReport,
+                    formState          = formState,
+                    onFormStateChange  = { formState = it },
+                    isSubmitting       = state.isSubmittingReport,
+                    submitError        = state.reportSubmitError,
+                    onDismissError     = { viewModel.clearReportSubmitError() }
                 )
             } else {
                 OutlinedTextField(
@@ -761,7 +809,7 @@ private fun ChatTabContent(
                             text     = when (chatMode) {
                                 ChatMode.OFFLINE -> "Offline"
                                 ChatMode.QUERY   -> "NLP Query"
-                                ChatMode.REPORT  -> "Report"
+                                ChatMode.REPORT  -> selectedReport.title
                                 else             -> "Auto"
                             },
                             fontSize = 11.sp,
@@ -791,10 +839,24 @@ private fun ChatTabContent(
                             text    = { Text("NLP Query — finance data", style = T.meta) },
                             onClick = { chatMode = ChatMode.QUERY; modeExpanded = false }
                         )
-                        DropdownMenuItem(
-                            text    = { Text("Report — ${selectedReport.title}", style = T.meta) },
-                            onClick = { chatMode = ChatMode.REPORT; modeExpanded = false }
-                        )
+                        REPORT_DEFINITIONS.forEach { def ->
+                            DropdownMenuItem(
+                                text    = { Text("Report — ${def.title}", style = T.meta) },
+                                onClick = {
+                                    selectedReport = def
+                                    formState = when (def.kind) {
+                                        ReportKind.ORDER_PNL      -> ReportFormState.OrderPnl()
+                                        ReportKind.HEALTH_REPORT  -> ReportFormState.HealthReport.defaultCurrentMonth()
+                                    }
+                                    chatMode = ChatMode.REPORT
+                                    modeExpanded = false
+                                    // Reclaim vertical space — the report
+                                    // panel competes with chat for room, so
+                                    // collapse the inbox if it was open.
+                                    inboxExpanded = false
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             enabled = false,
                             text    = { Text("Council — coming soon", style = T.meta, color = T.Muted) },
@@ -807,17 +869,27 @@ private fun ChatTabContent(
                 Button(
                     onClick        = {
                         if (chatMode == ChatMode.REPORT) {
-                            viewModel.submitReport(
-                                tickers = selectedTickers.toList(),
-                                top5    = reportTop5
-                            )
+                            when (val fs = formState) {
+                                is ReportFormState.OrderPnl -> viewModel.submitReport(
+                                    tickers = fs.selectedTickers.toList(),
+                                    top5    = fs.top5
+                                )
+                                is ReportFormState.HealthReport -> viewModel.submitHealthReport(
+                                    dateFrom    = fs.dateFrom,
+                                    dateTo      = fs.dateTo,
+                                    detailDates = fs.detailDates.ifEmpty { null }
+                                )
+                            }
                         } else {
                             sendMessage()
                         }
                     },
-                    enabled        = if (chatMode == ChatMode.REPORT)
-                        selectedTickers.isNotEmpty() && !state.isSubmittingReport
-                    else
+                    enabled        = if (chatMode == ChatMode.REPORT) {
+                        !state.isSubmittingReport && when (val fs = formState) {
+                            is ReportFormState.OrderPnl     -> fs.selectedTickers.isNotEmpty()
+                            is ReportFormState.HealthReport -> !viewModel.hasHealthReportInFlight()
+                        }
+                    } else
                         inputText.trim().isNotEmpty() && !isSending &&
                                 (chatMode == ChatMode.QUERY || !state.quotaExceeded),
                     colors         = ButtonDefaults.buttonColors(
@@ -852,23 +924,21 @@ private fun ChatTabContent(
 
 // ── Report params panel ──────────────────────────────────────────
 // Renders in place of the free-text input when chatMode == REPORT.
-// Param fields shown here are specific to ORDER_PNL today; a future
-// report with different params (e.g. just a date range, no tickers)
-// would branch on report.kind here rather than needing a new screen.
+// This composable owns only the shared shell (title row, collapse
+// toggle, submit error, submitting spinner) — the actual fields differ
+// per report and live in OrderPnlParamsBody / HealthReportParamsBody
+// below. Adding report #3 means a new *ParamsBody + one more branch in
+// the dispatch below, not a change to this shell.
 @Composable
 private fun ReportParamsPanel(
     report: ReportDefinition,
-    selectedTickers: Set<String>,
-    onAddTicker: (String) -> Unit,
-    onRemoveTicker: (String) -> Unit,
-    top5: Boolean,
-    onTop5Change: (Boolean) -> Unit,
+    formState: ReportFormState,
+    onFormStateChange: (ReportFormState) -> Unit,
     isSubmitting: Boolean,
     submitError: String?,
     onDismissError: () -> Unit
 ) {
-    var tickerInput by remember { mutableStateOf("") }
-    var collapsed   by remember { mutableStateOf(false) }
+    var collapsed by remember(report.kind) { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -887,9 +957,7 @@ private fun ReportParamsPanel(
         ) {
             Text(text = report.title, style = T.sectionHead, color = ReportPurple)
             Text(
-                text  = if (collapsed)
-                    "${selectedTickers.size} ticker${if (selectedTickers.size == 1) "" else "s"} · ${if (top5) "Top 5" else "Full"}  ▾"
-                else "▴",
+                text     = if (collapsed) "${collapsedSummary(formState)}  ▾" else "▴",
                 fontSize = 10.sp,
                 color    = T.Muted
             )
@@ -910,102 +978,22 @@ private fun ReportParamsPanel(
             }
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text       = "TICKERS",
-                fontSize   = 9.sp,
-                color      = T.Muted,
-                fontWeight = FontWeight.Medium
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier              = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-            ) {
-                selectedTickers.forEach { ticker ->
-                    FilterChip(
-                        selected = true,
-                        onClick  = { onRemoveTicker(ticker) },
-                        label    = { Text(text = "$ticker ✕", fontSize = 11.sp) },
-                        colors   = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = ReportPurple.copy(alpha = 0.15f),
-                            selectedLabelColor     = ReportPurple
-                        )
-                    )
-                }
-            }
-            // Free-text add — validates format only (uppercase letters,
-            // 1-6 chars), no backend lookup. Tapping an existing chip
-            // removes it (✕ above), so this is the only way to add.
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value         = tickerInput,
-                    onValueChange = { tickerInput = it.uppercase().filter { c -> c.isLetter() }.take(6) },
-                    placeholder   = { Text("Add ticker…", style = T.meta, fontStyle = FontStyle.Italic) },
-                    singleLine    = true,
-                    textStyle     = T.meta,
-                    colors        = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = ReportPurple,
-                        unfocusedBorderColor = ReportPurple.copy(alpha = 0.4f)
-                    ),
-                    modifier      = Modifier.weight(1f).height(48.dp)
+        Column(
+            modifier            = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 260.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            when (formState) {
+                is ReportFormState.OrderPnl -> OrderPnlParamsBody(
+                    state    = formState,
+                    onChange = onFormStateChange
                 )
-                OutlinedButton(
-                    onClick = {
-                        if (tickerInput.isNotBlank()) {
-                            onAddTicker(tickerInput)
-                            tickerInput = ""
-                        }
-                    },
-                    enabled        = tickerInput.isNotBlank(),
-                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                    shape          = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    modifier       = Modifier.height(36.dp)
-                ) {
-                    Text(text = "Add", fontSize = 11.sp, color = ReportPurple)
-                }
-            }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text       = "MODE",
-                fontSize   = 9.sp,
-                color      = T.Muted,
-                fontWeight = FontWeight.Medium
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(T.Rule.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                    .padding(3.dp)
-            ) {
-                listOf(false, true).forEach { isTop5 ->
-                    val active = top5 == isTop5
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onTop5Change(isTop5) }
-                            .background(
-                                if (active) T.Paper else Color.Transparent,
-                                RoundedCornerShape(6.dp)
-                            )
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text       = if (isTop5) "Top 5 best/worst" else "Full export",
-                            fontSize   = 10.sp,
-                            fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                            color      = if (active) T.Ink else T.Muted
-                        )
-                    }
-                }
+                is ReportFormState.HealthReport -> HealthReportParamsBody(
+                    state    = formState,
+                    onChange = onFormStateChange
+                )
             }
         }
 
@@ -1022,6 +1010,244 @@ private fun ReportParamsPanel(
                 Text(text = "Submitting…", style = T.meta, color = T.Muted)
             }
         }
+    }
+}
+
+// One-line summary shown when the panel is collapsed.
+private fun collapsedSummary(formState: ReportFormState): String = when (formState) {
+    is ReportFormState.OrderPnl -> {
+        val n = formState.selectedTickers.size
+        "$n ticker${if (n == 1) "" else "s"} · ${if (formState.top5) "Top 5" else "Full"}"
+    }
+    is ReportFormState.HealthReport -> {
+        val range = if (formState.dateFrom != null || formState.dateTo != null)
+            "${formState.dateFrom ?: "…"} → ${formState.dateTo ?: "…"}"
+        else "Full history"
+        range
+    }
+}
+
+// ── Order PnL params body ────────────────────────────────────────
+@Composable
+private fun OrderPnlParamsBody(
+    state: ReportFormState.OrderPnl,
+    onChange: (ReportFormState.OrderPnl) -> Unit
+) {
+    var tickerInput by remember { mutableStateOf("") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text       = "TICKERS",
+            fontSize   = 9.sp,
+            color      = T.Muted,
+            fontWeight = FontWeight.Medium
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier              = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+        ) {
+            state.selectedTickers.forEach { ticker ->
+                FilterChip(
+                    selected = true,
+                    onClick  = { onChange(state.copy(selectedTickers = state.selectedTickers - ticker)) },
+                    label    = { Text(text = "$ticker ✕", fontSize = 11.sp) },
+                    colors   = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = ReportPurple.copy(alpha = 0.15f),
+                        selectedLabelColor     = ReportPurple
+                    )
+                )
+            }
+        }
+        // Free-text add — validates format only (uppercase letters,
+        // 1-6 chars), no backend lookup. Tapping an existing chip
+        // removes it (✕ above), so this is the only way to add.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value         = tickerInput,
+                onValueChange = { tickerInput = it.uppercase().filter { c -> c.isLetter() }.take(6) },
+                placeholder   = { Text("Add ticker…", style = T.meta, fontStyle = FontStyle.Italic) },
+                singleLine    = true,
+                textStyle     = T.meta,
+                colors        = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = ReportPurple,
+                    unfocusedBorderColor = ReportPurple.copy(alpha = 0.4f)
+                ),
+                modifier      = Modifier.weight(1f).height(48.dp)
+            )
+            OutlinedButton(
+                onClick = {
+                    if (tickerInput.isNotBlank()) {
+                        onChange(state.copy(selectedTickers = state.selectedTickers + tickerInput))
+                        tickerInput = ""
+                    }
+                },
+                enabled        = tickerInput.isNotBlank(),
+                border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                shape          = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp),
+                modifier       = Modifier.height(36.dp)
+            ) {
+                Text(text = "Add", fontSize = 11.sp, color = ReportPurple)
+            }
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text       = "MODE",
+            fontSize   = 9.sp,
+            color      = T.Muted,
+            fontWeight = FontWeight.Medium
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(T.Rule.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                .padding(3.dp)
+        ) {
+            listOf(false, true).forEach { isTop5 ->
+                val active = state.top5 == isTop5
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onChange(state.copy(top5 = isTop5)) }
+                        .background(
+                            if (active) T.Paper else Color.Transparent,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text       = if (isTop5) "Top 5 best/worst" else "Full export",
+                        fontSize   = 10.sp,
+                        fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                        color      = if (active) T.Ink else T.Muted
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Health report params body ────────────────────────────────────
+// Disjoint shape from Order PnL — no tickers. Date fields are plain
+// text inputs (YYYY-MM-DD) rather than a date-picker dialog for this
+// first pass; swap for a real picker later if the typed format proves
+// error-prone in practice.
+@Composable
+private fun HealthReportParamsBody(
+    state: ReportFormState.HealthReport,
+    onChange: (ReportFormState.HealthReport) -> Unit
+) {
+    var detailDateInput by remember { mutableStateOf("") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text       = "DATE RANGE (optional)",
+            fontSize   = 9.sp,
+            color      = T.Muted,
+            fontWeight = FontWeight.Medium
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedTextField(
+                value         = state.dateFrom ?: "",
+                onValueChange = { onChange(state.copy(dateFrom = it.ifBlank { null })) },
+                placeholder   = { Text("From YYYY-MM-DD", style = T.meta, fontStyle = FontStyle.Italic) },
+                singleLine    = true,
+                textStyle     = T.meta,
+                colors        = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = ReportPurple,
+                    unfocusedBorderColor = ReportPurple.copy(alpha = 0.4f)
+                ),
+                modifier      = Modifier.weight(1f).height(48.dp)
+            )
+            OutlinedTextField(
+                value         = state.dateTo ?: "",
+                onValueChange = { onChange(state.copy(dateTo = it.ifBlank { null })) },
+                placeholder   = { Text("To YYYY-MM-DD", style = T.meta, fontStyle = FontStyle.Italic) },
+                singleLine    = true,
+                textStyle     = T.meta,
+                colors        = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = ReportPurple,
+                    unfocusedBorderColor = ReportPurple.copy(alpha = 0.4f)
+                ),
+                modifier      = Modifier.weight(1f).height(48.dp)
+            )
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text       = "DETAIL DATES (optional — defaults to most recent day)",
+            fontSize   = 9.sp,
+            color      = T.Muted,
+            fontWeight = FontWeight.Medium
+        )
+        if (state.detailDates.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier              = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                state.detailDates.forEach { date ->
+                    FilterChip(
+                        selected = true,
+                        onClick  = { onChange(state.copy(detailDates = state.detailDates - date)) },
+                        label    = { Text(text = "$date ✕", fontSize = 11.sp) },
+                        colors   = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ReportPurple.copy(alpha = 0.15f),
+                            selectedLabelColor     = ReportPurple
+                        )
+                    )
+                }
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value         = detailDateInput,
+                onValueChange = { detailDateInput = it.filter { c -> c.isDigit() || c == '-' }.take(10) },
+                placeholder   = { Text("Add date YYYY-MM-DD…", style = T.meta, fontStyle = FontStyle.Italic) },
+                singleLine    = true,
+                textStyle     = T.meta,
+                colors        = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = ReportPurple,
+                    unfocusedBorderColor = ReportPurple.copy(alpha = 0.4f)
+                ),
+                modifier      = Modifier.weight(1f).height(48.dp)
+            )
+            OutlinedButton(
+                onClick = {
+                    if (detailDateInput.isNotBlank()) {
+                        onChange(state.copy(detailDates = state.detailDates + detailDateInput))
+                        detailDateInput = ""
+                    }
+                },
+                enabled        = detailDateInput.isNotBlank(),
+                border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                shape          = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp),
+                modifier       = Modifier.height(36.dp)
+            ) {
+                Text(text = "Add", fontSize = 11.sp, color = ReportPurple)
+            }
+        }
+        Text(
+            text     = "Output: PDF (xlsx also generated server-side, not yet downloadable separately)",
+            fontSize = 9.sp,
+            color    = T.Muted
+        )
     }
 }
 
@@ -1701,7 +1927,10 @@ private fun ActionLogSection(
 ) {
     val bought   = trades.filter { it.status == "executed" || it.status == "verified" }
     val skipped  = trades.filter { it.status == "skipped" }
-    val deployed = bought.sumOf { it.capitalGbp.toDouble() }
+    val deployed = bought.sumOf { it.capitalGbp.
+
+
+    toDouble() }
     val projectedIncome = bought.sumOf {
         (it.actualIncomeGbp ?: it.projectedIncomeGbp).toDouble()
     }
@@ -2844,17 +3073,38 @@ private fun readTextFile(context: Context, uri: Uri): String {
     } catch (e: Exception) { "" }
 }
 
-// ── Report file download (binary .xlsx) ────────────────────────
-// Saves to the public Downloads folder via MediaStore so the file shows
-// up in the phone's Files app / Downloads, not just inside VitaNest.
-// MediaStore.Downloads requires API 29+ — VitaNest's minSdk is 29, so no
-// legacy fallback branch needed here.
+// ── Report file download (binary file — .xlsx or .pdf depending on
+//    report kind) ──────────────────────────────────────────────
+// Saves to the public Downloads folder so the file shows up in the
+// phone's Files app / Downloads, not just inside VitaNest.
+//
+// minSdk is 26 (confirmed against build.gradle — NOT 29 as assumed
+// earlier in this session). MediaStore.Downloads requires API 29+, so
+// API 26-28 needs a real legacy branch: write into the public Downloads
+// directory directly via java.io.File, then hand the result to
+// FileProvider for sharing — same FileProvider mechanism downloadJobAsText
+// already uses, just pointed at Environment.DIRECTORY_DOWNLOADS instead
+// of getExternalFilesDir. Requires res/xml/file_paths.xml to declare an
+// <external-path name="downloads" path="Download/" /> entry — added
+// 2026-06-27, FileProvider throws IllegalArgumentException without it.
+
+private fun isHealthReportJob(job: PendingOfflineItem): Boolean =
+    job.message.startsWith("Health Report") ||
+            job.response.contains("Health report", ignoreCase = true)
+
+private fun reportFileExtension(job: PendingOfflineItem): String =
+    if (isHealthReportJob(job)) "pdf" else "xlsx"
+
+private fun reportMimeType(job: PendingOfflineItem): String =
+    if (isHealthReportJob(job)) "application/pdf"
+    else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
 private fun reportFileName(job: PendingOfflineItem): String {
     // No file_path string is returned by /chat/offline/pending (confirmed
     // 2026-06-25 — only has_file: Boolean is present). Name from job_id
     // instead; the actual bytes come from GET .../job/{job_id}/file
     // regardless of what we call the saved local copy.
-    return "vitaclaw_report_${job.jobId}.xlsx"
+    return "vitaclaw_report_${job.jobId}.${reportFileExtension(job)}"
 }
 
 private suspend fun saveReportFileToDownloads(
@@ -2866,27 +3116,48 @@ private suspend fun saveReportFileToDownloads(
     val bytes = bytesResult.getOrNull() ?: return null
 
     val fileName = reportFileName(job)
-    val mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    val mimeType = reportMimeType(job)
 
     return try {
-        val contentValues = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
-            put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            // API 29+ — MediaStore.Downloads, scoped storage.
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+                put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val resolver  = context.contentResolver
+            val targetUri = resolver.insert(
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                contentValues
+            ) ?: return null
+
+            resolver.openOutputStream(targetUri)?.use { out -> out.write(bytes) }
+
+            contentValues.clear()
+            contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(targetUri, contentValues, null, null)
+
+            targetUri
+        } else {
+            // API 26-28 — no MediaStore.Downloads. Write directly into the
+            // public Downloads directory, then wrap via FileProvider (the
+            // same provider/authority downloadJobAsText already uses) so
+            // the result is a content:// Uri usable by Download/Share —
+            // a raw file:// Uri would violate FileUriExposedException on
+            // these API levels when handed to another app via an Intent.
+            @Suppress("DEPRECATION")
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS
+            )
+            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            val file = java.io.File(downloadsDir, fileName)
+            file.writeBytes(bytes)
+
+            androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.provider", file
+            )
         }
-        val resolver  = context.contentResolver
-        val targetUri = resolver.insert(
-            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            contentValues
-        ) ?: return null
-
-        resolver.openOutputStream(targetUri)?.use { out -> out.write(bytes) }
-
-        contentValues.clear()
-        contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
-        resolver.update(targetUri, contentValues, null, null)
-
-        targetUri
     } catch (e: Exception) {
         e.printStackTrace()
         null
@@ -2926,7 +3197,7 @@ private fun shareJobFile(
             return@launch
         }
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            type = reportMimeType(job)
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, job.message.take(60))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

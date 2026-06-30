@@ -38,6 +38,7 @@ import com.vitanest.app.data.remote.IncomeStressRequest
 import com.vitanest.app.data.remote.IncomeStressResponse
 import com.vitanest.app.data.remote.IntentsResponse
 import com.vitanest.app.data.remote.ObservationsResponse
+import com.vitanest.app.data.remote.OfflineHealthReportRequest
 import com.vitanest.app.data.remote.OfflineReportRequest
 import com.vitanest.app.data.remote.OfflineReportSubmitResponse
 import com.vitanest.app.data.remote.OrdersSummaryResponse
@@ -190,6 +191,34 @@ open class VitaClawRepository {
                 val body = r.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /chat/offline/report"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // whoop_health_report — second report type, disjoint param shape from
+    // order_pnl_report (no tickers; date range + detail dates + formats).
+    // formats is sent through, but VitaNest only ever surfaces the single
+    // "preferred" file from the response — see OfflineHealthReportRequest
+    // doc comment for why.
+    open suspend fun submitOfflineHealthReport(
+        dateFrom: String? = null,
+        dateTo: String? = null,
+        detailDates: List<String>? = null,
+        formats: List<String> = listOf("xlsx", "pdf")
+    ): Result<OfflineReportSubmitResponse> {
+        return try {
+            val r = apiService.submitOfflineHealthReport(
+                OfflineHealthReportRequest(
+                    dateFrom    = dateFrom,
+                    dateTo      = dateTo,
+                    detailDates = detailDates,
+                    formats     = formats
+                )
+            )
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /chat/offline/health-report"))
             } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
         } catch (e: Exception) { Result.failure(e) }
     }

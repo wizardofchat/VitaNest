@@ -169,19 +169,66 @@ class BuddieViewModel(
 
     private fun maybeStartPolling() {
         val hasPending = _state.value.offlineJobs.any { isInFlight(it.status) }
-        if (!hasPending || pollJob?.isActive == true) return
+        android.util.Log.d("BuddiePoll", "maybeStartPolling called — hasPending=$hasPending, pollJobActive=${pollJob?.isActive}")
+        if (!hasPending) return
+        if (pollJob?.isActive == true) {
+            android.util.Log.d("BuddiePoll", "skipped — a poll loop is already active")
+            return
+        }
 
         pollJob = viewModelScope.launch {
-            var elapsedMs = 0L
-            val timeoutMs = 60_000L
-            while (elapsedMs < timeoutMs) {
+            // No hard timeout — keep polling as long as anything is
+            // in-flight. A loop that gives up after a guessed duration
+            // and never restarts itself is worse than one that runs a
+            // bit longer on a slow job: the symptom (observed 2026-06-30)
+            // was the UI getting stuck until the app was force-closed and
+            // reopened, because nothing else calls maybeStartPolling()
+            // except initialise() and a fresh submit. Server-side jobs
+            // are confirmed to complete in under 10s in practice, so this
+            // loop in normal operation just runs a handful of ticks —
+            // the absence of a cap is a safety net, not an expectation.
+            android.util.Log.d("BuddiePoll", "poll loop started")
+            while (true) {
                 delay(4_000L)
-                elapsedMs += 4_000L
-                repository.getChatOfflinePending().onSuccess { p ->
-                    _state.value = _state.value.copy(offlineJobs = p.jobs)
-                    syncReportBubbles(p.jobs)
+                android.util.Log.d("BuddiePoll", "tick — fetching /chat/offline/pending")
+                repository.getChatOfflinePending().fold(
+                    onSuccess = { p ->
+                        android.util.Log.d("BuddiePoll", "fetch OK — ${p.jobs.size} jobs, statuses=${p.jobs.map { it.status }}")
+                        // Merge by jobId — do NOT blind-replace. The
+                        // server's /pending list can lag a few seconds
+                        // behind a just-submitted job (confirmed
+                        // 2026-06-30: job completed_at was AFTER the poll
+                        // tick that should have caught it, meaning the
+                        // job hadn't appeared in the list yet at that
+                        // exact moment). A blind replace silently drops
+                        // the locally-tracked in-flight job from state,
+                        // the "nothing in-flight" check then sees an
+                        // empty set and exits — permanently, since the
+                        // job's real completion is never re-checked.
+                        // Server entries always win when present (their
+                        // status is authoritative); a local-only job
+                        // missing from the response is kept as-is so the
+                        // loop keeps polling until the server actually
+                        // reports it.
+                        val serverById = p.jobs.associateBy { it.jobId }
+                        val merged = _state.value.offlineJobs.map { local ->
+                            serverById[local.jobId] ?: local
+                        }
+                        // Any server job not already tracked locally
+                        // (e.g. from a previous session) gets added too.
+                        val localIds = merged.map { it.jobId }.toSet()
+                        val mergedFull = merged + p.jobs.filter { it.jobId !in localIds }
+                        _state.value = _state.value.copy(offlineJobs = mergedFull)
+                        syncReportBubbles(mergedFull)
+                    },
+                    onFailure = { err ->
+                        android.util.Log.e("BuddiePoll", "fetch FAILED: ${err.message}", err)
+                    }
+                )
+                if (_state.value.offlineJobs.none { isInFlight(it.status) }) {
+                    android.util.Log.d("BuddiePoll", "nothing in-flight, loop exiting")
+                    return@launch
                 }
-                if (_state.value.offlineJobs.none { isInFlight(it.status) }) return@launch
             }
         }
     }
@@ -366,8 +413,85 @@ class BuddieViewModel(
         }
     }
 
+    // whoop_health_report — second report type. All params optional
+    // server-side, so no client-side empty-field guard like order_pnl's
+    // ticker check. A known backend race ("another operation is in
+    // progress") can fire if a second health-report request lands while
+    // one is still generating — hasHealthReportInFlight() lets the UI
+    // disable Generate while that's true, rather than relying on the
+    // server to reject the second request cleanly.
+    fun hasHealthReportInFlight(): Boolean =
+        _state.value.offlineJobs.any {
+            isInFlight(it.status) && it.message.startsWith("Health Report")
+        }
+
+    fun submitHealthReport(
+        dateFrom: String? = null,
+        dateTo: String? = null,
+        detailDates: List<String>? = null,
+        formats: List<String> = listOf("xlsx", "pdf")
+    ) {
+        if (hasHealthReportInFlight()) {
+            _state.value = _state.value.copy(
+                reportSubmitError = "A health report is already generating — wait for it to finish"
+            )
+            return
+        }
+        _state.value = _state.value.copy(isSubmittingReport = true, reportSubmitError = null)
+
+        val rangeLabel = if (dateFrom != null || dateTo != null)
+            "${dateFrom ?: "…"} to ${dateTo ?: "…"}" else "full history"
+        val requestSummary = "Health Report — $rangeLabel"
+
+        viewModelScope.launch {
+            repository.submitOfflineHealthReport(
+                dateFrom    = dateFrom,
+                dateTo      = dateTo,
+                detailDates = detailDates,
+                formats     = formats
+            ).fold(
+                onSuccess = { resp ->
+                    val newJob = PendingOfflineItem(
+                        jobId   = resp.jobId,
+                        message = requestSummary,
+                        status  = resp.status
+                    )
+                    val userBubble   = BubbleMsg(role = "user", text = requestSummary)
+                    val queuedBubble = BubbleMsg(
+                        role     = "buddy",
+                        text     = "Generating health report — job ${resp.jobId}…",
+                        isQueued = true,
+                        jobId    = resp.jobId
+                    )
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        offlineJobs        = _state.value.offlineJobs + newJob,
+                        bubbles            = _state.value.bubbles + userBubble + queuedBubble
+                    )
+                    maybeStartPolling()
+                },
+                onFailure = { err ->
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        reportSubmitError  = err.message ?: "Could not submit report — check Tailscale"
+                    )
+                }
+            )
+        }
+    }
+
     fun clearReportSubmitError() {
         _state.value = _state.value.copy(reportSubmitError = null)
+    }
+
+    // Safety net for the 2026-06-30 stuck-polling bug: if the polling
+    // coroutine got suspended/cancelled by an Activity lifecycle event
+    // while backgrounded, nothing else calls maybeStartPolling() again
+    // until app restart. Call this from a LaunchedEffect keyed on screen
+    // visibility (e.g. re-entering the Chat tab) so a stuck job recovers
+    // without requiring a full app close+reopen.
+    fun resumePollingIfNeeded() {
+        maybeStartPolling()
     }
 
     fun refreshQuota() {
