@@ -1,5 +1,5 @@
 package com.vitanest.app.data.local.journal
-    
+
 // © 2026 Sumeet Garg — VitaNest
 // Journal feature — Room entities, local-only for this session.
 // Mirrors the VitaClaw-side schema agreed for trips / trip_notes / voice_notes.
@@ -46,6 +46,7 @@ data class TripNoteEntity(
     val chargeStartTime: Long? = null,     // epoch millis
     val durationMinutes: Int? = null,      // nullable — mainly meaningful for electric
     val odometerKm: Double? = null,
+    val notes: String? = null,             // free-text, e.g. handy day notes when voice note isn't practical
     val voiceNoteId: String? = null,       // soft reference -> VoiceNoteEntity.noteId, no FK constraint
     val deleted: Boolean = false,          // soft delete — carries intent through to sync
     val source: String = "manual",         // "manual" | "voice_transcribed"

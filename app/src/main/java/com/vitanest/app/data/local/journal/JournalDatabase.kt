@@ -14,7 +14,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [TripEntity::class, TripNoteEntity::class, VoiceNoteEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class JournalDatabase : RoomDatabase() {
@@ -33,7 +33,13 @@ abstract class JournalDatabase : RoomDatabase() {
                     context.applicationContext,
                     JournalDatabase::class.java,
                     "vitanest_journal.db"
-                ).build().also { INSTANCE = it }
+                )
+                    // Pre-trip, test-data-only state — safe to wipe on schema
+                    // change. MUST be replaced with a real Migration once
+                    // real trip data exists, or it will silently delete it
+                    // on the next version bump.
+                    .fallbackToDestructiveMigration()
+                    .build().also { INSTANCE = it }
             }
         }
     }

@@ -72,6 +72,8 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
 
     fun observeNotesForTrip(tripId: String) = tripNoteDao.observeNotesForTrip(tripId)
 
+    fun observeVoiceNotesForTrip(tripId: String) = voiceNoteDao.observeForTrip(tripId)
+
     // ── Trips ────────────────────────────────────────────────
 
     fun startTrip(name: String, vehicleType: String, fuelType: String?, startDate: String) {
@@ -122,8 +124,10 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
         quantity: Double?,
         localCost: Double?,
         localCurrency: String?,
+        chargeStartTime: Long?,
         durationMinutes: Int?,
         odometerKm: Double?,
+        notes: String?,
         voiceNoteId: String?
     ) {
         viewModelScope.launch {
@@ -144,9 +148,10 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
                     localCurrency       = localCurrency,
                     costGbp             = null, // resolved by VitaClaw at sync
                     ratePerUnitLocal    = rate,
-                    chargeStartTime     = now,
+                    chargeStartTime     = chargeStartTime ?: now, // falls back to now only if the entered time text failed to parse
                     durationMinutes     = durationMinutes,
                     odometerKm           = odometerKm,
+                    notes                = notes,
                     voiceNoteId          = voiceNoteId,
                     source               = if (voiceNoteId != null) "voice_transcribed" else "manual",
                     createdAt            = now,
@@ -159,6 +164,45 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
     fun deleteTripStop(entryId: String) {
         viewModelScope.launch {
             tripNoteDao.softDelete(entryId, System.currentTimeMillis())
+        }
+    }
+
+    fun updateTripStop(
+        entryId: String,
+        latitude: Double,
+        longitude: Double,
+        locationName: String?,
+        quantity: Double?,
+        localCost: Double?,
+        localCurrency: String?,
+        chargeStartTime: Long?,
+        durationMinutes: Int?,
+        odometerKm: Double?,
+        notes: String?
+    ) {
+        viewModelScope.launch {
+            val existing = tripNoteDao.getNote(entryId) ?: return@launch
+            val rate = if (quantity != null && quantity > 0 && localCost != null) {
+                localCost / quantity
+            } else null
+
+            tripNoteDao.update(
+                existing.copy(
+                    latitude          = latitude,
+                    longitude         = longitude,
+                    locationName       = locationName,
+                    quantity           = quantity,
+                    localCost          = localCost,
+                    localCurrency      = localCurrency,
+                    ratePerUnitLocal   = rate,
+                    chargeStartTime    = chargeStartTime ?: existing.chargeStartTime,
+                    durationMinutes    = durationMinutes,
+                    odometerKm         = odometerKm,
+                    notes               = notes,
+                    updatedAt          = System.currentTimeMillis(),
+                    synced              = false
+                )
+            )
         }
     }
 
