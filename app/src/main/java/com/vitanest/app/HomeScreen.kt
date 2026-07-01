@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.ShowChart
@@ -662,7 +663,8 @@ fun InkBottomNav(
         NavItem("home",    "Home",    Icons.Filled.Home,           "home"),
         NavItem("banking", "Banking", Icons.Filled.AccountBalance,  "banking"),
         NavItem("health",  "Growth",  Icons.Filled.ShowChart,       "health"),
-        NavItem("buddie",  "Buddie",  Icons.AutoMirrored.Filled.Chat, "buddie")
+        NavItem("buddie",  "Buddie",  Icons.AutoMirrored.Filled.Chat, "buddie"),
+        NavItem("journal", "Journal", Icons.AutoMirrored.Filled.MenuBook, "journal")
     )
 
     Column(modifier = modifier.fillMaxWidth()) {

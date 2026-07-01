@@ -47,6 +47,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val journalViewModel: JournalViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                JournalViewModel(applicationContext) as T
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -95,6 +103,17 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("banking") {
                             BankingSummaryScreen(navController = navController, repository = vitaClawRepository)
+                        }
+                        composable("journal") {
+                            JournalScreen(navController = navController, viewModel = journalViewModel)
+                        }
+                        composable("trip_detail/{tripId}") { backStackEntry ->
+                            val tripId = backStackEntry.arguments?.getString("tripId") ?: ""
+                            TripDetailScreen(
+                                navController = navController,
+                                viewModel     = journalViewModel,
+                                tripId        = tripId
+                            )
                         }
                         composable("banking_analytics") {
                             BankingAnalyticsScreen(navController = navController, repository = vitaClawRepository)
