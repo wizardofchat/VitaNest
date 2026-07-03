@@ -15,7 +15,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [TripEntity::class, TripNoteEntity::class, VoiceNoteEntity::class,
         DayNoteEntity::class, TripPhotoEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class JournalDatabase : RoomDatabase() {

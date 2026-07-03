@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Stop
@@ -73,6 +74,7 @@ fun TripDetailScreen(
     tripId: String
 ) {
     val context = LocalContext.current
+    val vmUiState by viewModel.uiState.collectAsState()
     val trip  by viewModel.observeTrip(tripId).collectAsState(initial = null)
     val notes by viewModel.observeNotesForTrip(tripId).collectAsState(initial = emptyList())
     val tripVoiceNotes by viewModel.observeVoiceNotesForTrip(tripId).collectAsState(initial = emptyList())
@@ -87,6 +89,7 @@ fun TripDetailScreen(
     var editingDayNote by remember { mutableStateOf<DayNoteEntity?>(null) }
     var dayNoteTargetDate by remember { mutableStateOf(java.time.LocalDate.now().toString()) }
     var fabExpanded by remember { mutableStateOf(false) }
+    var showPhotoSourceChoice by remember { mutableStateOf(false) }
 
     var playingNoteId by remember { mutableStateOf<String?>(null) }
     val mediaPlayer = remember { MediaPlayer() }
@@ -109,20 +112,48 @@ fun TripDetailScreen(
         playingNoteId = null
     }
 
-    // Gallery-picker only for now — camera capture deferred post-Norway.
-    // Compression happens here at capture time: downscale long edge to
-    // ~2000px, re-encode JPEG q80, targeting the ~2-3MB cap VitaClaw's
-    // /trip/media contract requires. Stored to app-local file, not the
-    // original content:// URI, so it survives the picker's permission grant
-    // expiring.
-    val photoPickerLauncher = rememberLauncherForActivityResult(
+    // Gallery-picker — Android Photo Picker, no permission needed.
+    val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null && trip != null) {
             val savedPath = compressAndSavePhoto(context, uri)
-            if (savedPath != null) {
-                viewModel.addTripPhoto(tripId, savedPath)
-            }
+            if (savedPath != null) viewModel.addTripPhoto(tripId, savedPath)
+        }
+    }
+
+    // Camera capture — writes directly to a FileProvider-shared file, then
+    // runs through the same compress/save path as gallery picks so both
+    // routes end up identically sized on disk.
+    var pendingCaptureUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingCaptureUri
+        if (success && uri != null && trip != null) {
+            val savedPath = compressAndSavePhoto(context, uri)
+            if (savedPath != null) viewModel.addTripPhoto(tripId, savedPath)
+        }
+        pendingCaptureUri = null
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val uri = createCaptureUri(context)
+            pendingCaptureUri = uri
+            cameraLauncher.launch(uri)
+        }
+    }
+    fun launchCamera() {
+        val hasCameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        if (hasCameraPermission) {
+            val uri = createCaptureUri(context)
+            pendingCaptureUri = uri
+            cameraLauncher.launch(uri)
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
@@ -145,6 +176,15 @@ fun TripDetailScreen(
                     expanded         = fabExpanded,
                     onToggle         = { fabExpanded = !fabExpanded },
                     tripActive       = trip!!.status == "active",
+                    isRecording      = vmUiState.isRecording,
+                    onRecordVoice    = {
+                        if (vmUiState.isRecording) {
+                            fabExpanded = false
+                            viewModel.stopRecording(latitude = null, longitude = null)
+                        } else {
+                            viewModel.startRecording(tripId = tripId)
+                        }
+                    },
                     onAddStop        = {
                         fabExpanded = false; editingNote = null; showStopDialog = true
                     },
@@ -156,9 +196,7 @@ fun TripDetailScreen(
                     },
                     onAddPhoto       = {
                         fabExpanded = false
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
+                        showPhotoSourceChoice = true
                     },
                     onEndTrip        = { fabExpanded = false; showEndConfirm = true }
                 )
@@ -204,7 +242,7 @@ fun TripDetailScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 if (photos.isNotEmpty()) {
-                    TripGalleryRow(photos = photos, photoCount = photos.size)
+                    TripGalleryRow(photos = photos, photoCount = photos.size, onDeletePhoto = { viewModel.deleteTripPhoto(it) })
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
@@ -304,6 +342,28 @@ fun TripDetailScreen(
         }
     }
 
+    if (showPhotoSourceChoice) {
+        AlertDialog(
+            onDismissRequest = { showPhotoSourceChoice = false },
+            title = { Text("Add photo") },
+            text  = { Text("Take a new photo or choose one from your gallery.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPhotoSourceChoice = false
+                    launchCamera()
+                }) { Text("Camera") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPhotoSourceChoice = false
+                    galleryLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }) { Text("Gallery") }
+            }
+        )
+    }
+
     if (showStopDialog && trip != null) {
         AddStopDialog(
             existingNote = editingNote,
@@ -370,8 +430,8 @@ fun TripDetailScreen(
         EditTripHeaderDialog(
             trip      = trip!!,
             onDismiss = { showEditHeader = false },
-            onConfirm = { name, vehicleType, fuelType, flightOrigin, flightDestination ->
-                viewModel.updateTripDetails(tripId, name, vehicleType, fuelType, flightOrigin, flightDestination)
+            onConfirm = { name, vehicleType, fuelType, flightOrigin, flightDestination, carRegistration ->
+                viewModel.updateTripDetails(tripId, name, vehicleType, fuelType, flightOrigin, flightDestination, carRegistration)
                 showEditHeader = false
             }
         )
@@ -429,6 +489,10 @@ private fun TripHeaderCard(trip: TripEntity, onEdit: () -> Unit) {
                 color    = T.Ink
             )
         }
+        if (trip.carRegistration != null) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(text = "Reg: ${trip.carRegistration}", fontSize = 12.sp, color = T.Ink)
+        }
     }
 }
 
@@ -436,13 +500,14 @@ private fun TripHeaderCard(trip: TripEntity, onEdit: () -> Unit) {
 private fun EditTripHeaderDialog(
     trip: TripEntity,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, vehicleType: String, fuelType: String?, flightOrigin: String?, flightDestination: String?) -> Unit
+    onConfirm: (name: String, vehicleType: String, fuelType: String?, flightOrigin: String?, flightDestination: String?, carRegistration: String?) -> Unit
 ) {
     var name by remember { mutableStateOf(trip.name) }
     var vehicleType by remember { mutableStateOf(trip.vehicleType) }
     var fuelType by remember { mutableStateOf(trip.fuelType ?: "") }
     var flightOrigin by remember { mutableStateOf(trip.flightOrigin ?: "") }
     var flightDestination by remember { mutableStateOf(trip.flightDestination ?: "") }
+    var carRegistration by remember { mutableStateOf(trip.carRegistration ?: "") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -471,6 +536,14 @@ private fun EditTripHeaderDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+                if (vehicleType != "none") {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = carRegistration, onValueChange = { carRegistration = it },
+                        label = { Text("Car registration") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
@@ -494,7 +567,8 @@ private fun EditTripHeaderDialog(
                         name, vehicleType,
                         if (vehicleType == "ice") fuelType.ifBlank { null } else null,
                         flightOrigin.ifBlank { null },
-                        flightDestination.ifBlank { null }
+                        flightDestination.ifBlank { null },
+                        if (vehicleType != "none") carRegistration.ifBlank { null } else null
                     )
                 }
             }) { Text("Save") }
@@ -628,7 +702,7 @@ private fun DayNoteRow(
 }
 
 @Composable
-private fun TripGalleryRow(photos: List<TripPhotoEntity>, photoCount: Int) {
+private fun TripGalleryRow(photos: List<TripPhotoEntity>, photoCount: Int, onDeletePhoto: (String) -> Unit) {
     Column {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(text = "Trip gallery", fontSize = 12.sp, color = T.Muted)
@@ -642,18 +716,19 @@ private fun TripGalleryRow(photos: List<TripPhotoEntity>, photoCount: Int) {
             verticalArrangement   = Arrangement.spacedBy(6.dp)
         ) {
             items(photos) { photo ->
-                PhotoThumbnail(path = photo.uri)
+                PhotoThumbnail(photo = photo, onDelete = { onDeletePhoto(photo.id) })
             }
         }
     }
 }
 
 @Composable
-private fun PhotoThumbnail(path: String) {
-    val bitmap = remember(path) {
+private fun PhotoThumbnail(photo: TripPhotoEntity, onDelete: () -> Unit) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val bitmap = remember(photo.uri) {
         try {
             val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
-            BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+            BitmapFactory.decodeFile(photo.uri, opts)?.asImageBitmap()
         } catch (e: Exception) {
             null
         }
@@ -663,12 +738,27 @@ private fun PhotoThumbnail(path: String) {
             .aspectRatio(1f)
             .clip(RoundedCornerShape(6.dp))
             .background(T.Rule.copy(alpha = 0.3f))
+            .clickable { showDeleteConfirm = true }
     ) {
         if (bitmap != null) {
             Image(bitmap = bitmap, contentDescription = null, modifier = Modifier.fillMaxSize())
         } else {
             Icon(Icons.Filled.Photo, contentDescription = null, tint = T.Muted, modifier = Modifier.align(Alignment.Center).size(20.dp))
         }
+    }
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete photo?") },
+            confirmButton = {
+                TextButton(onClick = { onDelete(); showDeleteConfirm = false }) {
+                    Text("Delete", color = T.RecoveryRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -677,13 +767,20 @@ private fun TripDetailFab(
     expanded: Boolean,
     onToggle: () -> Unit,
     tripActive: Boolean,
+    isRecording: Boolean,
+    onRecordVoice: () -> Unit,
     onAddStop: () -> Unit,
     onAddDayNote: () -> Unit,
     onAddPhoto: () -> Unit,
     onEndTrip: () -> Unit
 ) {
     Column(horizontalAlignment = Alignment.End) {
-        if (expanded) {
+        if (isRecording) {
+            // Recording in progress — surface a dedicated stop control
+            // regardless of expanded state, so the user isn't stuck mid-record.
+            MiniFabAction(label = "Stop recording", icon = Icons.Filled.Stop, onClick = onRecordVoice)
+            Spacer(modifier = Modifier.height(10.dp))
+        } else if (expanded) {
             if (tripActive) {
                 MiniFabAction(label = "End trip", icon = Icons.Filled.Flag, onClick = onEndTrip)
                 Spacer(modifier = Modifier.height(10.dp))
@@ -692,12 +789,14 @@ private fun TripDetailFab(
             Spacer(modifier = Modifier.height(10.dp))
             MiniFabAction(label = "Add day note", icon = Icons.Filled.Notes, onClick = onAddDayNote)
             Spacer(modifier = Modifier.height(10.dp))
+            MiniFabAction(label = "Record voice note", icon = Icons.Filled.Mic, onClick = onRecordVoice)
+            Spacer(modifier = Modifier.height(10.dp))
             if (tripActive) {
                 MiniFabAction(label = "Add stop", icon = Icons.Filled.Add, onClick = onAddStop)
                 Spacer(modifier = Modifier.height(10.dp))
             }
         }
-        FloatingActionButton(onClick = onToggle, containerColor = T.Ink) {
+        FloatingActionButton(onClick = onToggle, containerColor = if (isRecording) T.RecoveryRed else T.Ink) {
             Icon(
                 imageVector        = if (expanded) Icons.Filled.Close else Icons.Filled.Add,
                 contentDescription = if (expanded) "Close" else "Actions",
@@ -742,6 +841,25 @@ private fun formatDayHeader(isoDate: String): String {
  * in VitaClaw's /trip/media contract. Returns the local file path, or null
  * on failure — caller must not add a TripPhotoEntity if this returns null.
  */
+/**
+ * Creates a content:// Uri for the camera to write into, backed by a file
+ * under the app's external-files directory — matches the existing
+ * FileProvider config (file_paths.xml already declares external-files-path,
+ * shared with the offline_responses feature). Camera writes JPEG to this
+ * Uri; compressAndSavePhoto then re-reads and re-compresses it into
+ * trip_photos, same as the gallery path, so both sources end up identical
+ * on disk.
+ */
+private fun createCaptureUri(context: android.content.Context): android.net.Uri {
+    val dir = File(context.getExternalFilesDir(null), "camera_captures").apply { mkdirs() }
+    val file = File(dir, "capture_${java.util.UUID.randomUUID()}.jpg")
+    return androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.provider",
+        file
+    )
+}
+
 private fun compressAndSavePhoto(context: android.content.Context, sourceUri: android.net.Uri): String? {
     return try {
         val inputStream = context.contentResolver.openInputStream(sourceUri) ?: return null

@@ -23,6 +23,8 @@ data class TripEntity(
     val status: String,                    // "active" | "completed"
     val flightOrigin: String? = null,      // nullable, e.g. "BFS"
     val flightDestination: String? = null, // nullable, e.g. "OSL"
+    val carRegistration: String? = null,   // nullable, e.g. "EK67 ABC" — hire car reg, useful for roadside assistance
+    val deleted: Boolean = false,          // soft delete — carries intent through to sync
     val createdAt: Long,                   // epoch millis
     val updatedAt: Long,
     val synced: Boolean = false            // local-only flag, not sent to server

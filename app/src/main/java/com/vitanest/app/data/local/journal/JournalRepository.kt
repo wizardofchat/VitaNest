@@ -18,6 +18,7 @@ interface JournalRepository {
     suspend fun getTrip(tripId: String): TripEntity?
     suspend fun upsertTrip(trip: TripEntity)
     suspend fun updateTrip(trip: TripEntity)
+    suspend fun softDeleteTrip(tripId: String)
 
     // Stops
     fun observeStopsForTrip(tripId: String): Flow<List<TripNoteEntity>>
@@ -26,6 +27,7 @@ interface JournalRepository {
     suspend fun updateStop(note: TripNoteEntity)
     suspend fun softDeleteStop(entryId: String)
     suspend fun countStopsForTrip(tripId: String): Int
+    fun observeStopCountForTrip(tripId: String): Flow<Int>
 
     // Voice notes
     fun observeAllVoiceNotes(): Flow<List<VoiceNoteEntity>>
@@ -66,6 +68,8 @@ class LocalJournalRepository(private val db: JournalDatabase) : JournalRepositor
     override suspend fun getTrip(tripId: String) = tripDao.getTrip(tripId)
     override suspend fun upsertTrip(trip: TripEntity) = tripDao.upsert(trip)
     override suspend fun updateTrip(trip: TripEntity) = tripDao.update(trip)
+    override suspend fun softDeleteTrip(tripId: String) =
+        tripDao.softDelete(tripId, System.currentTimeMillis())
 
     override fun observeStopsForTrip(tripId: String) = tripNoteDao.observeNotesForTrip(tripId)
     override suspend fun getStop(entryId: String) = tripNoteDao.getNote(entryId)
@@ -74,6 +78,7 @@ class LocalJournalRepository(private val db: JournalDatabase) : JournalRepositor
     override suspend fun softDeleteStop(entryId: String) =
         tripNoteDao.softDelete(entryId, System.currentTimeMillis())
     override suspend fun countStopsForTrip(tripId: String) = tripNoteDao.countForTrip(tripId)
+    override fun observeStopCountForTrip(tripId: String) = tripNoteDao.observeCountForTrip(tripId)
 
     override fun observeAllVoiceNotes() = voiceNoteDao.observeAll()
     override fun observeVoiceNotesForTrip(tripId: String) = voiceNoteDao.observeForTrip(tripId)

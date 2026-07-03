@@ -13,6 +13,7 @@ import android.media.MediaPlayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -165,7 +166,8 @@ fun JournalScreen(
                 TripCard(
                     trip      = uiState.activeTrip!!,
                     stopCount = uiState.activeTripStopCount,
-                    onClick   = { navController.navigate("trip_detail/${uiState.activeTrip!!.tripId}") }
+                    onClick   = { navController.navigate("trip_detail/${uiState.activeTrip!!.tripId}") },
+                    onDelete  = { viewModel.deleteTrip(uiState.activeTrip!!.tripId) }
                 )
                 Spacer(modifier = Modifier.height(6.dp))
             }
@@ -174,7 +176,8 @@ fun JournalScreen(
                 TripCard(
                     trip      = trip,
                     stopCount = null, // not loaded for completed list — detail screen shows count
-                    onClick   = { navController.navigate("trip_detail/${trip.tripId}") }
+                    onClick   = { navController.navigate("trip_detail/${trip.tripId}") },
+                    onDelete  = { viewModel.deleteTrip(trip.tripId) }
                 )
                 Spacer(modifier = Modifier.height(6.dp))
             }
@@ -222,8 +225,8 @@ fun JournalScreen(
     if (showNewTripSheet) {
         NewTripDialog(
             onDismiss = { showNewTripSheet = false },
-            onConfirm = { name, vehicleType, fuelType, startDate, flightOrigin, flightDestination ->
-                viewModel.startTrip(name, vehicleType, fuelType, startDate, flightOrigin, flightDestination)
+            onConfirm = { name, vehicleType, fuelType, startDate, flightOrigin, flightDestination, carRegistration ->
+                viewModel.startTrip(name, vehicleType, fuelType, startDate, flightOrigin, flightDestination, carRegistration)
                 showNewTripSheet = false
             }
         )
@@ -345,13 +348,19 @@ private fun VoiceNoteRow(note: VoiceNoteEntity, isPlaying: Boolean, onTogglePlay
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun TripCard(trip: TripEntity, stopCount: Int?, onClick: () -> Unit) {
+private fun TripCard(trip: TripEntity, stopCount: Int?, onClick: () -> Unit, onDelete: () -> Unit) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .border(width = T.ruleThickness, color = T.Rule, shape = RoundedCornerShape(8.dp))
-            .clickable { onClick() }
+            .combinedClickable(
+                onClick     = onClick,
+                onLongClick = { showDeleteConfirm = true }
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Row(
@@ -374,6 +383,22 @@ private fun TripCard(trip: TripEntity, stopCount: Int?, onClick: () -> Unit) {
             )
         }
     }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete \"${trip.name}\"?") },
+            text  = { Text("This removes the trip and all its stops, notes, and photos. This can't be undone locally.") },
+            confirmButton = {
+                TextButton(onClick = { onDelete(); showDeleteConfirm = false }) {
+                    Text("Delete", color = T.RecoveryRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -385,7 +410,8 @@ private fun NewTripDialog(
         fuelType: String?,
         startDate: String,
         flightOrigin: String?,
-        flightDestination: String?
+        flightDestination: String?,
+        carRegistration: String?
     ) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
@@ -394,6 +420,7 @@ private fun NewTripDialog(
     var startDate by remember { mutableStateOf(java.time.LocalDate.now().toString()) }
     var flightOrigin by remember { mutableStateOf("") }
     var flightDestination by remember { mutableStateOf("") }
+    var carRegistration by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -421,6 +448,15 @@ private fun NewTripDialog(
                     OutlinedTextField(
                         value = fuelType, onValueChange = { fuelType = it },
                         label = { Text("Fuel type (petrol/diesel)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (vehicleType != "none") {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = carRegistration, onValueChange = { carRegistration = it },
+                        label = { Text("Car registration (optional)") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -460,7 +496,8 @@ private fun NewTripDialog(
                             if (vehicleType == "ice") fuelType.ifBlank { null } else null,
                             startDate,
                             flightOrigin.ifBlank { null },
-                            flightDestination.ifBlank { null }
+                            flightDestination.ifBlank { null },
+                            if (vehicleType != "none") carRegistration.ifBlank { null } else null
                         )
                     }
                 }

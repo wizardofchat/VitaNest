@@ -13,13 +13,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TripDao {
 
-    @Query("SELECT * FROM trips ORDER BY createdAt DESC")
+    @Query("SELECT * FROM trips WHERE deleted = 0 ORDER BY createdAt DESC")
     fun observeTrips(): Flow<List<TripEntity>>
 
-    @Query("SELECT * FROM trips WHERE status = 'active' LIMIT 1")
+    @Query("SELECT * FROM trips WHERE status = 'active' AND deleted = 0 LIMIT 1")
     suspend fun getActiveTrip(): TripEntity?
 
-    @Query("SELECT * FROM trips WHERE status = 'active' LIMIT 1")
+    @Query("SELECT * FROM trips WHERE status = 'active' AND deleted = 0 LIMIT 1")
     fun observeActiveTrip(): Flow<TripEntity?>
 
     @Query("SELECT * FROM trips WHERE tripId = :tripId")
@@ -33,6 +33,9 @@ interface TripDao {
 
     @Update
     suspend fun update(trip: TripEntity)
+
+    @Query("UPDATE trips SET deleted = 1, updatedAt = :now, synced = 0 WHERE tripId = :tripId")
+    suspend fun softDelete(tripId: String, now: Long)
 
     @Query("SELECT * FROM trips WHERE synced = 0")
     suspend fun getUnsyncedTrips(): List<TripEntity>
@@ -62,6 +65,9 @@ interface TripNoteDao {
 
     @Query("SELECT COUNT(*) FROM trip_notes WHERE tripId = :tripId AND deleted = 0")
     suspend fun countForTrip(tripId: String): Int
+
+    @Query("SELECT COUNT(*) FROM trip_notes WHERE tripId = :tripId AND deleted = 0")
+    fun observeCountForTrip(tripId: String): Flow<Int>
 }
 
 @Dao

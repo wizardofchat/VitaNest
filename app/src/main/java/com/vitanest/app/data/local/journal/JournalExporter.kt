@@ -104,6 +104,7 @@ object JournalExporter {
         put("status", t.status)
         put("flightOrigin", t.flightOrigin)
         put("flightDestination", t.flightDestination)
+        put("carRegistration", t.carRegistration)
     }
 
     private fun stopToJson(s: TripNoteEntity) = JSONObject().apply {

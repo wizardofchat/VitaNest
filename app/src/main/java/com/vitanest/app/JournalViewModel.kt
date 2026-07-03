@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -55,6 +57,7 @@ class JournalViewModel(
 
     private var initialised = false
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun initialise() {
         if (initialised) return
         initialised = true
@@ -64,10 +67,15 @@ class JournalViewModel(
                 repository.observeTrips(),
                 repository.observeRecentUntaggedVoiceNotes()
             ) { trips, recentVoice -> trips to recentVoice }
-                .collect { (trips, recentVoice) ->
+                .flatMapLatest { (trips, recentVoice) ->
+                    val active = trips.firstOrNull { it.status == "active" }
+                    val stopCountFlow = active?.let { repository.observeStopCountForTrip(it.tripId) }
+                        ?: kotlinx.coroutines.flow.flowOf(0)
+                    stopCountFlow.map { count -> Triple(trips, recentVoice, count) }
+                }
+                .collect { (trips, recentVoice, stopCount) ->
                     val active    = trips.firstOrNull { it.status == "active" }
                     val completed = trips.filter { it.status == "completed" }
-                    val stopCount = active?.let { repository.countStopsForTrip(it.tripId) } ?: 0
 
                     _uiState.value = _uiState.value.copy(
                         activeTrip          = active,
@@ -102,7 +110,8 @@ class JournalViewModel(
         fuelType: String?,
         startDate: String,
         flightOrigin: String? = null,
-        flightDestination: String? = null
+        flightDestination: String? = null,
+        carRegistration: String? = null
     ) {
         viewModelScope.launch {
             val existing = repository.getActiveTrip()
@@ -120,6 +129,7 @@ class JournalViewModel(
                     status             = "active",
                     flightOrigin       = flightOrigin,
                     flightDestination  = flightDestination,
+                    carRegistration    = carRegistration,
                     createdAt          = now,
                     updatedAt          = now
                 )
@@ -134,7 +144,8 @@ class JournalViewModel(
         vehicleType: String,
         fuelType: String?,
         flightOrigin: String?,
-        flightDestination: String?
+        flightDestination: String?,
+        carRegistration: String?
     ) {
         viewModelScope.launch {
             val existing = repository.getTrip(tripId) ?: return@launch
@@ -145,11 +156,16 @@ class JournalViewModel(
                     fuelType           = fuelType,
                     flightOrigin       = flightOrigin,
                     flightDestination  = flightDestination,
+                    carRegistration    = carRegistration,
                     updatedAt          = System.currentTimeMillis(),
                     synced             = false
                 )
             )
         }
+    }
+
+    fun deleteTrip(tripId: String) {
+        viewModelScope.launch { repository.softDeleteTrip(tripId) }
     }
 
     fun endTrip(tripId: String, endDate: String) {
