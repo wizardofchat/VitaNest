@@ -13,8 +13,9 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [TripEntity::class, TripNoteEntity::class, VoiceNoteEntity::class],
-    version = 2,
+    entities = [TripEntity::class, TripNoteEntity::class, VoiceNoteEntity::class,
+        DayNoteEntity::class, TripPhotoEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class JournalDatabase : RoomDatabase() {
@@ -22,6 +23,8 @@ abstract class JournalDatabase : RoomDatabase() {
     abstract fun tripDao(): TripDao
     abstract fun tripNoteDao(): TripNoteDao
     abstract fun voiceNoteDao(): VoiceNoteDao
+    abstract fun dayNoteDao(): DayNoteDao
+    abstract fun tripPhotoDao(): TripPhotoDao
 
     companion object {
         @Volatile
@@ -34,10 +37,11 @@ abstract class JournalDatabase : RoomDatabase() {
                     JournalDatabase::class.java,
                     "vitanest_journal.db"
                 )
-                    // Pre-trip, test-data-only state — safe to wipe on schema
-                    // change. MUST be replaced with a real Migration once
-                    // real trip data exists, or it will silently delete it
-                    // on the next version bump.
+                    // v2 -> v3: added flightOrigin/flightDestination to trips,
+                    // added day_notes + trip_photos tables. Destructive fallback
+                    // used deliberately here — explicit call, still test-data-only
+                    // ("Testing"/"Testing Norway"), NOT the pattern for any future
+                    // schema change once real Norway trip data exists.
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }
             }

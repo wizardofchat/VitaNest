@@ -16,11 +16,13 @@ import androidx.room.PrimaryKey
 data class TripEntity(
     @PrimaryKey val tripId: String,       // client-generated UUID, sync key
     val name: String,
-    val vehicleType: String,               // "electric" | "ice"
+    val vehicleType: String,               // "electric" | "ice" | "none"
     val fuelType: String? = null,          // nullable, ICE only e.g. petrol/diesel
     val startDate: String,                 // ISO date "YYYY-MM-DD"
     val endDate: String? = null,           // null while active
     val status: String,                    // "active" | "completed"
+    val flightOrigin: String? = null,      // nullable, e.g. "BFS"
+    val flightDestination: String? = null, // nullable, e.g. "OSL"
     val createdAt: Long,                   // epoch millis
     val updatedAt: Long,
     val synced: Boolean = false            // local-only flag, not sent to server
@@ -29,7 +31,8 @@ data class TripEntity(
 /**
  * A single charge/fuel stop within a trip.
  * quantity's unit (kWh vs litres) is inferred from the parent trip's vehicleType —
- * deliberately not duplicated on every row.
+ * deliberately not duplicated on every row. When vehicleType == "none", quantity/
+ * localCost/localCurrency are expected to stay null — the UI should not require them.
  */
 @Entity(tableName = "trip_notes")
 data class TripNoteEntity(
@@ -43,7 +46,7 @@ data class TripNoteEntity(
     val localCurrency: String? = null,     // e.g. "NOK" — entered as-is, no FX lookup on device
     val costGbp: Double? = null,           // left null; VitaClaw backfills via existing FX infra
     val ratePerUnitLocal: Double? = null,  // computed client-side: localCost / quantity
-    val chargeStartTime: Long? = null,     // epoch millis
+    val chargeStartTime: Long? = null,     // epoch millis — day grouping key, dynamic on edit
     val durationMinutes: Int? = null,      // nullable — mainly meaningful for electric
     val odometerKm: Double? = null,
     val notes: String? = null,             // free-text, e.g. handy day notes when voice note isn't practical
@@ -69,6 +72,40 @@ data class VoiceNoteEntity(
     val longitude: Double? = null,
     val transcript: String? = null,        // always null on-device — VitaClaw's Whisper agent fills this
     val transcribedAt: Long? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val synced: Boolean = false
+)
+
+/**
+ * A free-text note for a specific calendar date within a trip. Independent of
+ * stops — a day can have a note with zero stops, or stops with no note.
+ * Day grouping on the UI side is derived (group stops/notes by date), not
+ * stored — this row's `date` field IS the grouping key for itself.
+ */
+@Entity(tableName = "day_notes")
+data class DayNoteEntity(
+    @PrimaryKey val entryId: String,       // client-generated UUID, sync key
+    val tripId: String,                    // FK -> TripEntity.tripId
+    val date: String,                      // ISO date "YYYY-MM-DD"
+    val text: String,
+    val voiceNoteId: String? = null,       // soft reference -> VoiceNoteEntity.noteId
+    val deleted: Boolean = false,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val synced: Boolean = false
+)
+
+/**
+ * A photo attached at trip level (not per-day, not per-stop) — deliberately
+ * flat. Gallery-picker only for now; camera capture deferred post-trip.
+ */
+@Entity(tableName = "trip_photos")
+data class TripPhotoEntity(
+    @PrimaryKey val id: String,            // client-generated UUID, sync key
+    val tripId: String,                    // FK -> TripEntity.tripId
+    val uri: String,                       // local content:// or file:// URI
+    val deleted: Boolean = false,
     val createdAt: Long,
     val updatedAt: Long,
     val synced: Boolean = false

@@ -117,7 +117,16 @@ fun JournalScreen(
                 isRecording          = uiState.isRecording,
                 audioPermissionGranted = audioPermissionGranted,
                 onRequestPermission   = { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                onStart               = { viewModel.startRecording(tripId = uiState.activeTrip?.tripId) },
+                onStart               = {
+                    // Guard: don't start recording until the first uiState
+                    // emission has landed. Tapping before then reads
+                    // activeTrip as null even when a trip IS active, which
+                    // silently untags the note (root cause of voice notes
+                    // missing from TripDetailScreen).
+                    if (uiState.isReady) {
+                        viewModel.startRecording(tripId = uiState.activeTrip?.tripId)
+                    }
+                },
                 onStop                = { viewModel.stopRecording(latitude = null, longitude = null) }
             )
 
@@ -213,8 +222,8 @@ fun JournalScreen(
     if (showNewTripSheet) {
         NewTripDialog(
             onDismiss = { showNewTripSheet = false },
-            onConfirm = { name, vehicleType, fuelType, startDate ->
-                viewModel.startTrip(name, vehicleType, fuelType, startDate)
+            onConfirm = { name, vehicleType, fuelType, startDate, flightOrigin, flightDestination ->
+                viewModel.startTrip(name, vehicleType, fuelType, startDate, flightOrigin, flightDestination)
                 showNewTripSheet = false
             }
         )
@@ -370,18 +379,27 @@ private fun TripCard(trip: TripEntity, stopCount: Int?, onClick: () -> Unit) {
 @Composable
 private fun NewTripDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, vehicleType: String, fuelType: String?, startDate: String) -> Unit
+    onConfirm: (
+        name: String,
+        vehicleType: String,
+        fuelType: String?,
+        startDate: String,
+        flightOrigin: String?,
+        flightDestination: String?
+    ) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var vehicleType by remember { mutableStateOf("electric") }
     var fuelType by remember { mutableStateOf("") }
     var startDate by remember { mutableStateOf(java.time.LocalDate.now().toString()) }
+    var flightOrigin by remember { mutableStateOf("") }
+    var flightDestination by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("New trip") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
                     label = { Text("Trip name") },
@@ -393,7 +411,7 @@ private fun NewTripDialog(
                 Row(modifier = Modifier.fillMaxWidth()) {
                     FilterChipRow(
                         selected = vehicleType,
-                        options  = listOf("electric" to "Electric", "ice" to "ICE"),
+                        options  = listOf("electric" to "Electric", "ice" to "ICE", "none" to "None"),
                         onSelect = { vehicleType = it }
                     )
                 }
@@ -413,13 +431,37 @@ private fun NewTripDialog(
                     label = { Text("Start date (YYYY-MM-DD)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Flight (optional)", fontSize = 12.sp, color = T.Muted)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = flightOrigin, onValueChange = { flightOrigin = it },
+                        label = { Text("From (e.g. BFS)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedTextField(
+                        value = flightDestination, onValueChange = { flightDestination = it },
+                        label = { Text("To (e.g. OSL)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     if (name.isNotBlank()) {
-                        onConfirm(name, vehicleType, fuelType.ifBlank { null }, startDate)
+                        onConfirm(
+                            name,
+                            vehicleType,
+                            if (vehicleType == "ice") fuelType.ifBlank { null } else null,
+                            startDate,
+                            flightOrigin.ifBlank { null },
+                            flightDestination.ifBlank { null }
+                        )
                     }
                 }
             ) { Text("Start trip") }

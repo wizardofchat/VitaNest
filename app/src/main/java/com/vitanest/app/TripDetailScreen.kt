@@ -8,23 +8,39 @@ package com.vitanest.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.location.Geocoder
 import android.media.MediaPlayer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Notes
+import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,13 +50,18 @@ import androidx.navigation.NavController
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.vitanest.app.data.local.journal.DayNoteEntity
 import com.vitanest.app.data.local.journal.TripEntity
 import com.vitanest.app.data.local.journal.TripNoteEntity
+import com.vitanest.app.data.local.journal.TripPhotoEntity
 import com.vitanest.app.data.local.journal.VoiceNoteEntity
 import com.vitanest.app.ui.theme.VitaNestTheme as T
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 import kotlin.coroutines.resume
 
@@ -51,13 +72,21 @@ fun TripDetailScreen(
     viewModel: JournalViewModel,
     tripId: String
 ) {
+    val context = LocalContext.current
     val trip  by viewModel.observeTrip(tripId).collectAsState(initial = null)
     val notes by viewModel.observeNotesForTrip(tripId).collectAsState(initial = emptyList())
     val tripVoiceNotes by viewModel.observeVoiceNotesForTrip(tripId).collectAsState(initial = emptyList())
+    val dayNotes by viewModel.observeDayNotesForTrip(tripId).collectAsState(initial = emptyList())
+    val photos by viewModel.observePhotosForTrip(tripId).collectAsState(initial = emptyList())
 
     var showStopDialog by remember { mutableStateOf(false) }
     var editingNote by remember { mutableStateOf<TripNoteEntity?>(null) }
     var showEndConfirm by remember { mutableStateOf(false) }
+    var showEditHeader by remember { mutableStateOf(false) }
+    var showDayNoteDialog by remember { mutableStateOf(false) }
+    var editingDayNote by remember { mutableStateOf<DayNoteEntity?>(null) }
+    var dayNoteTargetDate by remember { mutableStateOf(java.time.LocalDate.now().toString()) }
+    var fabExpanded by remember { mutableStateOf(false) }
 
     var playingNoteId by remember { mutableStateOf<String?>(null) }
     val mediaPlayer = remember { MediaPlayer() }
@@ -80,6 +109,23 @@ fun TripDetailScreen(
         playingNoteId = null
     }
 
+    // Gallery-picker only for now — camera capture deferred post-Norway.
+    // Compression happens here at capture time: downscale long edge to
+    // ~2000px, re-encode JPEG q80, targeting the ~2-3MB cap VitaClaw's
+    // /trip/media contract requires. Stored to app-local file, not the
+    // original content:// URI, so it survives the picker's permission grant
+    // expiring.
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null && trip != null) {
+            val savedPath = compressAndSavePhoto(context, uri)
+            if (savedPath != null) {
+                viewModel.addTripPhoto(tripId, savedPath)
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -92,7 +138,32 @@ fun TripDetailScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = T.Paper)
             )
         },
-        containerColor = T.Paper
+        containerColor = T.Paper,
+        floatingActionButton = {
+            if (trip != null) {
+                TripDetailFab(
+                    expanded         = fabExpanded,
+                    onToggle         = { fabExpanded = !fabExpanded },
+                    tripActive       = trip!!.status == "active",
+                    onAddStop        = {
+                        fabExpanded = false; editingNote = null; showStopDialog = true
+                    },
+                    onAddDayNote     = {
+                        fabExpanded = false
+                        editingDayNote = null
+                        dayNoteTargetDate = java.time.LocalDate.now().toString()
+                        showDayNoteDialog = true
+                    },
+                    onAddPhoto       = {
+                        fabExpanded = false
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    onEndTrip        = { fabExpanded = false; showEndConfirm = true }
+                )
+            }
+        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -105,49 +176,119 @@ fun TripDetailScreen(
             if (currentTrip == null) {
                 Text("Loading…", color = T.Muted, fontSize = 13.sp)
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                TripHeaderCard(trip = currentTrip, onEdit = { showEditHeader = true })
+
+                Spacer(modifier = Modifier.height(8.dp))
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val uri = com.vitanest.app.data.local.journal.JournalExporter.exportTripWithData(
+                                context    = context,
+                                trip       = currentTrip,
+                                stops      = notes,
+                                dayNotes   = dayNotes,
+                                voiceNotes = tripVoiceNotes,
+                                photos     = photos
+                            )
+                            if (uri != null) {
+                                com.vitanest.app.data.local.journal.JournalExporter.shareExport(context, uri)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text     = currentTrip.vehicleType.replaceFirstChar { it.uppercase() } +
-                                (currentTrip.fuelType?.let { " · $it" } ?: ""),
-                        fontSize = 12.sp,
-                        color    = T.Muted
-                    )
-                    Text(
-                        text     = if (currentTrip.status == "active") "Active" else "Completed",
-                        fontSize = 12.sp,
-                        color    = T.Muted
-                    )
+                    Text("Export / Share backup", fontSize = 13.sp, color = T.Ink)
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (photos.isNotEmpty()) {
+                    TripGalleryRow(photos = photos, photoCount = photos.size)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
                 Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
 
-                    Text(text = "Stops (${notes.size})", style = T.sectionHead)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // Derive the day list from whichever dates actually have
+                    // a stop or a day note — grow-as-you-go, nothing
+                    // pre-generated for empty future/past days. Grouping key
+                    // for stops is chargeStartTime (dynamic — editing a
+                    // stop's date moves it to that day's card on next
+                    // recompose, no extra logic needed here).
+                    val stopsByDate = notes.groupBy { note ->
+                        note.chargeStartTime?.let {
+                            java.time.Instant.ofEpochMilli(it)
+                                .atZone(java.time.ZoneId.systemDefault())
+                                .toLocalDate().toString()
+                        } ?: "unknown"
+                    }
+                    val dayNotesByDate = dayNotes.groupBy { it.date }
+                    val allDates = (stopsByDate.keys + dayNotesByDate.keys)
+                        .filter { it != "unknown" }
+                        .sorted()
 
-                    if (notes.isEmpty()) {
-                        Text("No stops logged yet", fontSize = 12.sp, color = T.Muted)
+                    if (allDates.isEmpty() && (stopsByDate["unknown"]?.isEmpty() != false)) {
+                        Text("No stops or notes logged yet", fontSize = 12.sp, color = T.Muted)
                     } else {
-                        notes.forEach { note ->
-                            StopRow(
-                                note      = note,
-                                editable   = currentTrip.status == "active",
-                                onEdit     = { editingNote = note; showStopDialog = true },
-                                onDelete   = { viewModel.deleteTripStop(note.entryId) }
+                        allDates.forEach { date ->
+                            Text(
+                                text     = formatDayHeader(date),
+                                fontSize = 12.sp,
+                                color    = T.Muted,
+                                modifier = Modifier.padding(bottom = 8.dp)
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
+                            stopsByDate[date]?.forEach { note ->
+                                StopRow(
+                                    note      = note,
+                                    editable   = true,
+                                    onEdit     = { editingNote = note; showStopDialog = true },
+                                    onDelete   = { viewModel.deleteTripStop(note.entryId) }
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            dayNotesByDate[date]?.forEach { dn ->
+                                val linkedVoiceNote = tripVoiceNotes.firstOrNull { it.noteId == dn.voiceNoteId }
+                                DayNoteRow(
+                                    dayNote      = dn,
+                                    voiceNote     = linkedVoiceNote,
+                                    isPlaying     = linkedVoiceNote != null && playingNoteId == linkedVoiceNote.noteId,
+                                    onTogglePlay  = { linkedVoiceNote?.let { if (playingNoteId == it.noteId) stopNote() else playNote(it) } },
+                                    onEdit        = { editingDayNote = dn; dayNoteTargetDate = dn.date; showDayNoteDialog = true },
+                                    onDelete      = { viewModel.deleteDayNote(dn.entryId) }
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        // Stops with no parseable chargeStartTime — shouldn't
+                        // normally happen (addTripStop defaults to "now"),
+                        // but shown rather than silently dropped if it does.
+                        stopsByDate["unknown"]?.let { unknownStops ->
+                            if (unknownStops.isNotEmpty()) {
+                                Text("Undated", fontSize = 12.sp, color = T.Muted, modifier = Modifier.padding(bottom = 8.dp))
+                                unknownStops.forEach { note ->
+                                    StopRow(
+                                        note      = note,
+                                        editable   = true,
+                                        onEdit     = { editingNote = note; showStopDialog = true },
+                                        onDelete   = { viewModel.deleteTripStop(note.entryId) }
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
+                            }
                         }
                     }
 
-                    if (tripVoiceNotes.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Text(text = "Voice notes (${tripVoiceNotes.size})", style = T.sectionHead)
+                    // Voice notes not linked to any day note — surfaced
+                    // separately so a mistagged/unlinked one is never lost.
+                    val linkedVoiceNoteIds = dayNotes.mapNotNull { it.voiceNoteId }.toSet()
+                    val unlinkedVoiceNotes = tripVoiceNotes.filter { it.noteId !in linkedVoiceNoteIds }
+                    if (unlinkedVoiceNotes.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(text = "Other voice notes (${unlinkedVoiceNotes.size})", style = T.sectionHead)
                         Spacer(modifier = Modifier.height(8.dp))
-                        tripVoiceNotes.forEach { note ->
+                        unlinkedVoiceNotes.forEach { note ->
                             TripVoiceNoteRow(
                                 note        = note,
                                 isPlaying    = playingNoteId == note.noteId,
@@ -157,24 +298,7 @@ fun TripDetailScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-
-                if (currentTrip.status == "active") {
-                    Button(
-                        onClick  = { editingNote = null; showStopDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors   = ButtonDefaults.buttonColors(containerColor = T.Ink)
-                    ) {
-                        Text("Add stop", color = T.InkInverted)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick  = { showEndConfirm = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("End trip", color = T.Ink)
-                    }
+                    Spacer(modifier = Modifier.height(80.dp)) // clear the FAB
                 }
             }
         }
@@ -183,6 +307,7 @@ fun TripDetailScreen(
     if (showStopDialog && trip != null) {
         AddStopDialog(
             existingNote = editingNote,
+            vehicleType  = trip!!.vehicleType,
             onDismiss    = { showStopDialog = false; editingNote = null },
             onConfirm    = { location, latitude, longitude, quantity, cost, currency, chargeStartTimeMillis, duration, odometer, notes ->
                 val note = editingNote
@@ -222,6 +347,36 @@ fun TripDetailScreen(
         )
     }
 
+    if (showDayNoteDialog && trip != null) {
+        DayNoteDialog(
+            existingNote = editingDayNote,
+            defaultDate   = dayNoteTargetDate,
+            availableVoiceNotes = tripVoiceNotes,
+            onDismiss    = { showDayNoteDialog = false; editingDayNote = null },
+            onConfirm    = { date, text, voiceNoteId ->
+                val existing = editingDayNote
+                if (existing != null) {
+                    viewModel.updateDayNote(existing.entryId, text, voiceNoteId)
+                } else {
+                    viewModel.addDayNote(tripId, date, text, voiceNoteId)
+                }
+                showDayNoteDialog = false
+                editingDayNote = null
+            }
+        )
+    }
+
+    if (showEditHeader && trip != null) {
+        EditTripHeaderDialog(
+            trip      = trip!!,
+            onDismiss = { showEditHeader = false },
+            onConfirm = { name, vehicleType, fuelType, flightOrigin, flightDestination ->
+                viewModel.updateTripDetails(tripId, name, vehicleType, fuelType, flightOrigin, flightDestination)
+                showEditHeader = false
+            }
+        )
+    }
+
     if (showEndConfirm && trip != null) {
         AlertDialog(
             onDismissRequest = { showEndConfirm = false },
@@ -237,6 +392,403 @@ fun TripDetailScreen(
                 TextButton(onClick = { showEndConfirm = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+private fun TripHeaderCard(trip: TripEntity, onEdit: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(width = T.ruleThickness, color = T.Rule, shape = RoundedCornerShape(10.dp))
+            .clickable { onEdit() }
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                text     = trip.vehicleType.replaceFirstChar { it.uppercase() } +
+                        (trip.fuelType?.let { " · $it" } ?: ""),
+                fontSize = 12.sp,
+                color    = T.Muted
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text     = if (trip.status == "active") "Active" else "Completed",
+                    fontSize = 12.sp,
+                    color    = T.Muted
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Edit", fontSize = 11.sp, color = T.Ink)
+            }
+        }
+        if (trip.flightOrigin != null || trip.flightDestination != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text     = "${trip.flightOrigin ?: "—"} → ${trip.flightDestination ?: "—"}",
+                fontSize = 12.sp,
+                color    = T.Ink
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditTripHeaderDialog(
+    trip: TripEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, vehicleType: String, fuelType: String?, flightOrigin: String?, flightDestination: String?) -> Unit
+) {
+    var name by remember { mutableStateOf(trip.name) }
+    var vehicleType by remember { mutableStateOf(trip.vehicleType) }
+    var fuelType by remember { mutableStateOf(trip.fuelType ?: "") }
+    var flightOrigin by remember { mutableStateOf(trip.flightOrigin ?: "") }
+    var flightDestination by remember { mutableStateOf(trip.flightDestination ?: "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit trip") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it },
+                    label = { Text("Trip name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Vehicle type", fontSize = 12.sp, color = T.Muted)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    FilterChipRowShared(
+                        selected = vehicleType,
+                        options  = listOf("electric" to "Electric", "ice" to "ICE", "none" to "None"),
+                        onSelect = { vehicleType = it }
+                    )
+                }
+                if (vehicleType == "ice") {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = fuelType, onValueChange = { fuelType = it },
+                        label = { Text("Fuel type") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = flightOrigin, onValueChange = { flightOrigin = it },
+                        label = { Text("Flight from") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedTextField(
+                        value = flightDestination, onValueChange = { flightDestination = it },
+                        label = { Text("Flight to") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (name.isNotBlank()) {
+                    onConfirm(
+                        name, vehicleType,
+                        if (vehicleType == "ice") fuelType.ifBlank { null } else null,
+                        flightOrigin.ifBlank { null },
+                        flightDestination.ifBlank { null }
+                    )
+                }
+            }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun DayNoteDialog(
+    existingNote: DayNoteEntity?,
+    defaultDate: String,
+    availableVoiceNotes: List<VoiceNoteEntity>,
+    onDismiss: () -> Unit,
+    onConfirm: (date: String, text: String, voiceNoteId: String?) -> Unit
+) {
+    val isEditing = existingNote != null
+    var date by remember { mutableStateOf(existingNote?.date ?: defaultDate) }
+    var text by remember { mutableStateOf(existingNote?.text ?: "") }
+    var selectedVoiceNoteId by remember { mutableStateOf(existingNote?.voiceNoteId) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isEditing) "Edit day note" else "Add day note") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = date, onValueChange = { date = it },
+                    label = { Text("Date (YYYY-MM-DD)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it },
+                    label = { Text("Notes") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (availableVoiceNotes.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Link a voice note (optional)", fontSize = 12.sp, color = T.Muted)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    availableVoiceNotes.forEach { vn ->
+                        val secs = vn.durationSeconds ?: 0
+                        val label = "${secs / 60}:${(secs % 60).toString().padStart(2, '0')} memo"
+                        val isSelected = selectedVoiceNoteId == vn.noteId
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedVoiceNoteId = if (isSelected) null else vn.noteId }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text     = if (isSelected) "✓ " else "  ",
+                                color    = T.Ink
+                            )
+                            Text(text = label, fontSize = 13.sp, color = T.Ink)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (text.isNotBlank()) onConfirm(date, text, selectedVoiceNoteId)
+            }) { Text(if (isEditing) "Update" else "Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun DayNoteRow(
+    dayNote: DayNoteEntity,
+    voiceNote: VoiceNoteEntity?,
+    isPlaying: Boolean,
+    onTogglePlay: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(width = T.ruleThickness, color = T.Rule, shape = RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Notes, contentDescription = null, tint = T.Muted, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Day note", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = T.Ink)
+            }
+            Row {
+                Text("Edit", fontSize = 11.sp, color = T.Ink, modifier = Modifier.clickable { onEdit() })
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("Delete", fontSize = 11.sp, color = T.RecoveryRed, modifier = Modifier.clickable { onDelete() })
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = dayNote.text, fontSize = 13.sp, color = T.Ink)
+        if (voiceNote != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .border(width = T.ruleThickness, color = T.Rule, shape = RoundedCornerShape(6.dp))
+                    .clickable { onTogglePlay() }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector        = if (isPlaying) Icons.Filled.Stop else Icons.AutoMirrored.Filled.PlaylistPlay,
+                    contentDescription = null,
+                    tint               = if (isPlaying) T.RecoveryRed else T.Muted,
+                    modifier           = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                val secs = voiceNote.durationSeconds ?: 0
+                Text(text = "${secs / 60}:${(secs % 60).toString().padStart(2, '0')} memo", fontSize = 12.sp, color = T.Ink)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TripGalleryRow(photos: List<TripPhotoEntity>, photoCount: Int) {
+    Column {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = "Trip gallery", fontSize = 12.sp, color = T.Muted)
+            Text(text = "$photoCount photo${if (photoCount == 1) "" else "s"}", fontSize = 12.sp, color = T.Muted)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        LazyVerticalGrid(
+            columns  = GridCells.Fixed(4),
+            modifier = Modifier.heightIn(max = 200.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement   = Arrangement.spacedBy(6.dp)
+        ) {
+            items(photos) { photo ->
+                PhotoThumbnail(path = photo.uri)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoThumbnail(path: String) {
+    val bitmap = remember(path) {
+        try {
+            val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+            BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+        } catch (e: Exception) {
+            null
+        }
+    }
+    Box(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(6.dp))
+            .background(T.Rule.copy(alpha = 0.3f))
+    ) {
+        if (bitmap != null) {
+            Image(bitmap = bitmap, contentDescription = null, modifier = Modifier.fillMaxSize())
+        } else {
+            Icon(Icons.Filled.Photo, contentDescription = null, tint = T.Muted, modifier = Modifier.align(Alignment.Center).size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun TripDetailFab(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    tripActive: Boolean,
+    onAddStop: () -> Unit,
+    onAddDayNote: () -> Unit,
+    onAddPhoto: () -> Unit,
+    onEndTrip: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.End) {
+        if (expanded) {
+            if (tripActive) {
+                MiniFabAction(label = "End trip", icon = Icons.Filled.Flag, onClick = onEndTrip)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+            MiniFabAction(label = "Add photo", icon = Icons.Filled.Photo, onClick = onAddPhoto)
+            Spacer(modifier = Modifier.height(10.dp))
+            MiniFabAction(label = "Add day note", icon = Icons.Filled.Notes, onClick = onAddDayNote)
+            Spacer(modifier = Modifier.height(10.dp))
+            if (tripActive) {
+                MiniFabAction(label = "Add stop", icon = Icons.Filled.Add, onClick = onAddStop)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+        }
+        FloatingActionButton(onClick = onToggle, containerColor = T.Ink) {
+            Icon(
+                imageVector        = if (expanded) Icons.Filled.Close else Icons.Filled.Add,
+                contentDescription = if (expanded) "Close" else "Actions",
+                tint               = T.InkInverted
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiniFabAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text     = label,
+            fontSize = 12.sp,
+            color    = T.Ink,
+            modifier = Modifier
+                .background(T.Paper, RoundedCornerShape(6.dp))
+                .border(width = T.ruleThickness, color = T.Rule, shape = RoundedCornerShape(6.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        SmallFloatingActionButton(onClick = onClick, containerColor = T.Rule.copy(alpha = 0.3f)) {
+            Icon(icon, contentDescription = label, tint = T.Ink, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+/** "2026-07-13" -> "13 Jul 2026". Falls back to the raw string if parsing fails. */
+private fun formatDayHeader(isoDate: String): String {
+    return try {
+        val date = java.time.LocalDate.parse(isoDate)
+        date.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+    } catch (e: Exception) {
+        isoDate
+    }
+}
+
+/**
+ * Copies the picked image into app-local storage, downscaling the long edge
+ * to ~2000px and re-encoding as JPEG q80 to target the ~2-3MB cap specified
+ * in VitaClaw's /trip/media contract. Returns the local file path, or null
+ * on failure — caller must not add a TripPhotoEntity if this returns null.
+ */
+private fun compressAndSavePhoto(context: android.content.Context, sourceUri: android.net.Uri): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(sourceUri) ?: return null
+        val original = BitmapFactory.decodeStream(inputStream)
+        inputStream.close()
+        if (original == null) return null
+
+        val maxEdge = 2000
+        val scale = maxEdge.toFloat() / maxOf(original.width, original.height)
+        val resized = if (scale < 1f) {
+            android.graphics.Bitmap.createScaledBitmap(
+                original,
+                (original.width * scale).toInt(),
+                (original.height * scale).toInt(),
+                true
+            )
+        } else original
+
+        val dir = File(context.filesDir, "trip_photos").apply { mkdirs() }
+        val outFile = File(dir, "photo_${java.util.UUID.randomUUID()}.jpg")
+        FileOutputStream(outFile).use { out ->
+            resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+        }
+        outFile.absolutePath
+    } catch (e: Exception) {
+        null
+    }
+}
+
+@Composable
+private fun FilterChipRowShared(
+    selected: String,
+    options: List<Pair<String, String>>,
+    onSelect: (String) -> Unit
+) {
+    options.forEach { (value, label) ->
+        val isSelected = value == selected
+        Box(
+            modifier = Modifier
+                .padding(end = 8.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (isSelected) T.Ink else T.Rule.copy(alpha = 0.3f))
+                .clickable { onSelect(value) }
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Text(text = label, fontSize = 12.sp, color = if (isSelected) T.InkInverted else T.Ink)
+        }
     }
 }
 
@@ -401,9 +953,13 @@ private suspend fun reverseGeocode(context: android.content.Context, lat: Double
     }
 }
 
+private val CURRENCY_OPTIONS = listOf("NOK", "GBP", "EUR", "USD", "Other")
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddStopDialog(
     existingNote: TripNoteEntity?,
+    vehicleType: String, // "electric" | "ice" | "none" — controls whether energy/cost fields show
     onDismiss: () -> Unit,
     onConfirm: (
         location: String?,
@@ -429,7 +985,9 @@ private fun AddStopDialog(
     var locationAutofilled by remember { mutableStateOf(false) }
     var quantity by remember { mutableStateOf(existingNote?.quantity?.toString() ?: "") }
     var cost by remember { mutableStateOf(existingNote?.localCost?.toString() ?: "") }
-    var currency by remember { mutableStateOf(existingNote?.localCurrency ?: "") }
+    var currency by remember { mutableStateOf(existingNote?.localCurrency ?: "NOK") }
+    var currencyDropdownExpanded by remember { mutableStateOf(false) }
+    var customCurrency by remember { mutableStateOf("") }
     var duration by remember { mutableStateOf(existingNote?.durationMinutes?.toString() ?: "") }
     var odometer by remember { mutableStateOf(existingNote?.odometerKm?.toString() ?: "") }
     var notes by remember { mutableStateOf(existingNote?.notes ?: "") }
@@ -520,25 +1078,59 @@ private fun AddStopDialog(
                     label = { Text("Location") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = quantity, onValueChange = { quantity = it },
-                    label = { Text("Energy/fuel amount") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row {
+                if (vehicleType != "none") {
+                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = cost, onValueChange = { cost = it },
-                        label = { Text("Cost") },
-                        modifier = Modifier.weight(1f)
+                        value = quantity, onValueChange = { quantity = it },
+                        label = { Text("Energy/fuel amount") },
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    OutlinedTextField(
-                        value = currency, onValueChange = { currency = it },
-                        label = { Text("Currency") },
-                        modifier = Modifier.weight(1f)
-                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row {
+                        OutlinedTextField(
+                            value = cost, onValueChange = { cost = it },
+                            label = { Text("Cost") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        ExposedDropdownMenuBox(
+                            expanded = currencyDropdownExpanded,
+                            onExpandedChange = { currencyDropdownExpanded = it },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = currency,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Currency") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyDropdownExpanded) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = currencyDropdownExpanded,
+                                onDismissRequest = { currencyDropdownExpanded = false }
+                            ) {
+                                CURRENCY_OPTIONS.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option) },
+                                        onClick = {
+                                            currency = option
+                                            currencyDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (currency == "Other") {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = customCurrency,
+                            onValueChange = { customCurrency = it },
+                            label = { Text("Enter currency code") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
@@ -578,13 +1170,18 @@ private fun AddStopDialog(
                 } catch (e: Exception) {
                     null // invalid text — falls back to "now" at the call site rather than blocking save
                 }
+                val resolvedCurrency = when {
+                    vehicleType == "none" -> null
+                    currency == "Other"    -> customCurrency.ifBlank { null }
+                    else                    -> currency
+                }
                 onConfirm(
                     location.ifBlank { null },
                     lat,
                     lon,
-                    quantity.toDoubleOrNull(),
-                    cost.toDoubleOrNull(),
-                    currency.ifBlank { null },
+                    if (vehicleType == "none") null else quantity.toDoubleOrNull(),
+                    if (vehicleType == "none") null else cost.toDoubleOrNull(),
+                    resolvedCurrency,
                     parsedTimeMillis,
                     duration.toIntOrNull(),
                     odometer.toDoubleOrNull(),

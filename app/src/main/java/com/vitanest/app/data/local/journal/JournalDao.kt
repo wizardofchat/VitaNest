@@ -85,3 +85,44 @@ interface VoiceNoteDao {
     @Query("SELECT * FROM voice_notes WHERE synced = 0")
     suspend fun getUnsyncedVoiceNotes(): List<VoiceNoteEntity>
 }
+
+@Dao
+interface DayNoteDao {
+
+    @Query("SELECT * FROM day_notes WHERE tripId = :tripId AND deleted = 0 ORDER BY date ASC")
+    fun observeForTrip(tripId: String): Flow<List<DayNoteEntity>>
+
+    @Query("SELECT * FROM day_notes WHERE entryId = :entryId")
+    suspend fun getNote(entryId: String): DayNoteEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(note: DayNoteEntity)
+
+    @Update
+    suspend fun update(note: DayNoteEntity)
+
+    @Query("UPDATE day_notes SET deleted = 1, updatedAt = :now, synced = 0 WHERE entryId = :entryId")
+    suspend fun softDelete(entryId: String, now: Long)
+
+    @Query("SELECT * FROM day_notes WHERE synced = 0")
+    suspend fun getUnsyncedNotes(): List<DayNoteEntity>
+}
+
+@Dao
+interface TripPhotoDao {
+
+    @Query("SELECT * FROM trip_photos WHERE tripId = :tripId AND deleted = 0 ORDER BY createdAt DESC")
+    fun observeForTrip(tripId: String): Flow<List<TripPhotoEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(photo: TripPhotoEntity)
+
+    @Query("UPDATE trip_photos SET deleted = 1, updatedAt = :now, synced = 0 WHERE id = :id")
+    suspend fun softDelete(id: String, now: Long)
+
+    @Query("SELECT * FROM trip_photos WHERE synced = 0")
+    suspend fun getUnsyncedPhotos(): List<TripPhotoEntity>
+
+    @Query("SELECT COUNT(*) FROM trip_photos WHERE tripId = :tripId AND deleted = 0")
+    suspend fun countForTrip(tripId: String): Int
+}

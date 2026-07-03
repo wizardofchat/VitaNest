@@ -1,16 +1,23 @@
 package com.vitanest.app
 
 // © 2026 Sumeet Garg — VitaNest
-// JournalViewModel — Voice Notes + Trip Log, fully local (Room), no network
-// calls. Sync to VitaClaw is a separate, later action — not wired here.
+// JournalViewModel — Voice Notes + Trip Log, fully local (Room via
+// JournalRepository), no network calls. Sync to VitaClaw is a separate,
+// later action — not wired here. All reads/writes route through
+// JournalRepository, not DAOs directly — this is the seam where a
+// VitaClaw-backed implementation swaps in later without touching this file.
 
 import android.content.Context
 import android.media.MediaRecorder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vitanest.app.data.local.journal.DayNoteEntity
 import com.vitanest.app.data.local.journal.JournalDatabase
+import com.vitanest.app.data.local.journal.JournalRepository
+import com.vitanest.app.data.local.journal.LocalJournalRepository
 import com.vitanest.app.data.local.journal.TripEntity
 import com.vitanest.app.data.local.journal.TripNoteEntity
+import com.vitanest.app.data.local.journal.TripPhotoEntity
 import com.vitanest.app.data.local.journal.VoiceNoteEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,15 +32,19 @@ data class JournalUiState(
     val completedTrips:   List<TripEntity>     = emptyList(),
     val recentVoiceNotes: List<VoiceNoteEntity> = emptyList(),
     val activeTripStopCount: Int                = 0,
-    val isRecording:      Boolean               = false
+    val isRecording:      Boolean               = false,
+    // False until the first combine() emission lands. Recording must be
+    // blocked while this is false — otherwise activeTrip reads as null
+    // even when a trip IS active, and the voice note saves untagged
+    // (root cause of the "voice notes missing from TripDetailScreen" bug).
+    val isReady:          Boolean               = false
 )
 
-class JournalViewModel(private val appContext: Context) : ViewModel() {
-
-    private val db          = JournalDatabase.getInstance(appContext)
-    private val tripDao      = db.tripDao()
-    private val tripNoteDao  = db.tripNoteDao()
-    private val voiceNoteDao = db.voiceNoteDao()
+class JournalViewModel(
+    private val appContext: Context,
+    private val repository: JournalRepository =
+        LocalJournalRepository(JournalDatabase.getInstance(appContext))
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(JournalUiState())
     val uiState: StateFlow<JournalUiState> = _uiState.asStateFlow()
@@ -50,49 +61,92 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
 
         viewModelScope.launch {
             combine(
-                tripDao.observeTrips(),
-                voiceNoteDao.observeRecentUntagged()
+                repository.observeTrips(),
+                repository.observeRecentUntaggedVoiceNotes()
             ) { trips, recentVoice -> trips to recentVoice }
                 .collect { (trips, recentVoice) ->
                     val active    = trips.firstOrNull { it.status == "active" }
                     val completed = trips.filter { it.status == "completed" }
-                    val stopCount = active?.let { tripNoteDao.countForTrip(it.tripId) } ?: 0
+                    val stopCount = active?.let { repository.countStopsForTrip(it.tripId) } ?: 0
 
                     _uiState.value = _uiState.value.copy(
                         activeTrip          = active,
                         completedTrips       = completed,
                         recentVoiceNotes      = recentVoice,
-                        activeTripStopCount   = stopCount
+                        activeTripStopCount   = stopCount,
+                        isReady               = true
                     )
                 }
         }
     }
 
-    fun observeTrip(tripId: String) = tripDao.observeTrip(tripId)
+    fun observeTrip(tripId: String) = repository.observeTrip(tripId)
 
-    fun observeNotesForTrip(tripId: String) = tripNoteDao.observeNotesForTrip(tripId)
+    fun observeNotesForTrip(tripId: String) = repository.observeStopsForTrip(tripId)
 
-    fun observeVoiceNotesForTrip(tripId: String) = voiceNoteDao.observeForTrip(tripId)
+    fun observeVoiceNotesForTrip(tripId: String) = repository.observeVoiceNotesForTrip(tripId)
+
+    fun observeDayNotesForTrip(tripId: String) = repository.observeDayNotesForTrip(tripId)
+
+    fun observePhotosForTrip(tripId: String) = repository.observePhotosForTrip(tripId)
 
     // ── Trips ────────────────────────────────────────────────
 
-    fun startTrip(name: String, vehicleType: String, fuelType: String?, startDate: String) {
+    /**
+     * vehicleType: "electric" | "ice" | "none". fuelType only meaningful for "ice".
+     * flightOrigin/flightDestination are both nullable — not every trip flies.
+     */
+    fun startTrip(
+        name: String,
+        vehicleType: String,
+        fuelType: String?,
+        startDate: String,
+        flightOrigin: String? = null,
+        flightDestination: String? = null
+    ) {
         viewModelScope.launch {
-            val existing = tripDao.getActiveTrip()
+            val existing = repository.getActiveTrip()
             if (existing != null) return@launch // UI should block this via canStartNewTrip
 
             val now = System.currentTimeMillis()
-            tripDao.upsert(
+            repository.upsertTrip(
                 TripEntity(
-                    tripId      = UUID.randomUUID().toString(),
-                    name        = name,
-                    vehicleType = vehicleType,
-                    fuelType    = fuelType,
-                    startDate   = startDate,
-                    endDate     = null,
-                    status      = "active",
-                    createdAt   = now,
-                    updatedAt   = now
+                    tripId             = UUID.randomUUID().toString(),
+                    name               = name,
+                    vehicleType        = vehicleType,
+                    fuelType           = fuelType,
+                    startDate          = startDate,
+                    endDate            = null,
+                    status             = "active",
+                    flightOrigin       = flightOrigin,
+                    flightDestination  = flightDestination,
+                    createdAt          = now,
+                    updatedAt          = now
+                )
+            )
+        }
+    }
+
+    /** Edit trip header fields post-creation. Status/dates untouched here — use endTrip() for status. */
+    fun updateTripDetails(
+        tripId: String,
+        name: String,
+        vehicleType: String,
+        fuelType: String?,
+        flightOrigin: String?,
+        flightDestination: String?
+    ) {
+        viewModelScope.launch {
+            val existing = repository.getTrip(tripId) ?: return@launch
+            repository.updateTrip(
+                existing.copy(
+                    name               = name,
+                    vehicleType        = vehicleType,
+                    fuelType           = fuelType,
+                    flightOrigin       = flightOrigin,
+                    flightDestination  = flightDestination,
+                    updatedAt          = System.currentTimeMillis(),
+                    synced             = false
                 )
             )
         }
@@ -100,8 +154,8 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
 
     fun endTrip(tripId: String, endDate: String) {
         viewModelScope.launch {
-            val trip = tripDao.getTrip(tripId) ?: return@launch
-            tripDao.update(
+            val trip = repository.getTrip(tripId) ?: return@launch
+            repository.updateTrip(
                 trip.copy(
                     status    = "completed",
                     endDate   = endDate,
@@ -115,6 +169,9 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
     fun canStartNewTrip(): Boolean = _uiState.value.activeTrip == null
 
     // ── Trip stops ───────────────────────────────────────────
+    // Note: when trip.vehicleType == "none", quantity/localCost/localCurrency
+    // are expected to arrive null from the UI — this layer doesn't enforce it,
+    // the Add Stop form is responsible for hiding those fields in that case.
 
     fun addTripStop(
         tripId: String,
@@ -136,7 +193,7 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
                 localCost / quantity
             } else null
 
-            tripNoteDao.upsert(
+            repository.upsertStop(
                 TripNoteEntity(
                     entryId            = UUID.randomUUID().toString(),
                     tripId             = tripId,
@@ -162,9 +219,7 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
     }
 
     fun deleteTripStop(entryId: String) {
-        viewModelScope.launch {
-            tripNoteDao.softDelete(entryId, System.currentTimeMillis())
-        }
+        viewModelScope.launch { repository.softDeleteStop(entryId) }
     }
 
     fun updateTripStop(
@@ -181,12 +236,12 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
         notes: String?
     ) {
         viewModelScope.launch {
-            val existing = tripNoteDao.getNote(entryId) ?: return@launch
+            val existing = repository.getStop(entryId) ?: return@launch
             val rate = if (quantity != null && quantity > 0 && localCost != null) {
                 localCost / quantity
             } else null
 
-            tripNoteDao.update(
+            repository.updateStop(
                 existing.copy(
                     latitude          = latitude,
                     longitude         = longitude,
@@ -195,6 +250,10 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
                     localCost          = localCost,
                     localCurrency      = localCurrency,
                     ratePerUnitLocal   = rate,
+                    // Dynamic day grouping: editing chargeStartTime to a new
+                    // date moves this stop to that day's card on next
+                    // recompose — grouping is derived from this field, not
+                    // separately stored, so no extra logic is needed here.
                     chargeStartTime    = chargeStartTime ?: existing.chargeStartTime,
                     durationMinutes    = durationMinutes,
                     odometerKm         = odometerKm,
@@ -206,10 +265,75 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
         }
     }
 
+    // ── Day notes ────────────────────────────────────────────
+
+    fun addDayNote(tripId: String, date: String, text: String, voiceNoteId: String?) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            repository.upsertDayNote(
+                DayNoteEntity(
+                    entryId     = UUID.randomUUID().toString(),
+                    tripId      = tripId,
+                    date        = date,
+                    text        = text,
+                    voiceNoteId = voiceNoteId,
+                    createdAt   = now,
+                    updatedAt   = now
+                )
+            )
+        }
+    }
+
+    fun updateDayNote(entryId: String, text: String, voiceNoteId: String?) {
+        viewModelScope.launch {
+            val existing = repository.getDayNote(entryId) ?: return@launch
+            repository.updateDayNote(
+                existing.copy(
+                    text        = text,
+                    voiceNoteId = voiceNoteId,
+                    updatedAt   = System.currentTimeMillis(),
+                    synced      = false
+                )
+            )
+        }
+    }
+
+    fun deleteDayNote(entryId: String) {
+        viewModelScope.launch { repository.softDeleteDayNote(entryId) }
+    }
+
+    // ── Trip photos ──────────────────────────────────────────
+    // Gallery-picker only for now — uri comes from
+    // ActivityResultContracts.PickVisualMedia in the Composable layer.
+    // Camera capture deferred post-Norway (flagged scope decision).
+
+    fun addTripPhoto(tripId: String, uri: String) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            repository.upsertPhoto(
+                TripPhotoEntity(
+                    id        = UUID.randomUUID().toString(),
+                    tripId    = tripId,
+                    uri       = uri,
+                    createdAt = now,
+                    updatedAt = now
+                )
+            )
+        }
+    }
+
+    fun deleteTripPhoto(id: String) {
+        viewModelScope.launch { repository.softDeletePhoto(id) }
+    }
+
     // ── Voice notes ──────────────────────────────────────────
 
     fun startRecording(tripId: String?) {
         if (_uiState.value.isRecording) return
+        // Guard against the untagged-voice-note bug: if uiState hasn't
+        // emitted yet, activeTrip reads as null even when a trip IS
+        // active. Block recording rather than risk a silent mistag.
+        if (!_uiState.value.isReady) return
 
         val dir = File(appContext.filesDir, "voice_notes").apply { mkdirs() }
         val fileName = "note_${UUID.randomUUID()}.m4a"
@@ -253,7 +377,7 @@ class JournalViewModel(private val appContext: Context) : ViewModel() {
 
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            voiceNoteDao.upsert(
+            repository.upsertVoiceNote(
                 VoiceNoteEntity(
                     noteId          = UUID.randomUUID().toString(),
                     tripId           = tripId,
