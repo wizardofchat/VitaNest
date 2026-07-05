@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.location.Geocoder
 import android.media.MediaPlayer
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,6 +91,10 @@ fun TripDetailScreen(
     var dayNoteTargetDate by remember { mutableStateOf(java.time.LocalDate.now().toString()) }
     var fabExpanded by remember { mutableStateOf(false) }
     var showPhotoSourceChoice by remember { mutableStateOf(false) }
+    var pendingPhotoPath by remember { mutableStateOf<String?>(null) }
+    var pendingPhotoLat by remember { mutableStateOf<Double?>(null) }
+    var pendingPhotoLng by remember { mutableStateOf<Double?>(null) }
+    var showPhotoCaptionDialog by remember { mutableStateOf(false) }
 
     var playingNoteId by remember { mutableStateOf<String?>(null) }
     val mediaPlayer = remember { MediaPlayer() }
@@ -112,13 +117,27 @@ fun TripDetailScreen(
         playingNoteId = null
     }
 
+    val photoScope = androidx.compose.runtime.rememberCoroutineScope()
+
     // Gallery-picker — Android Photo Picker, no permission needed.
+    // GPS captured best-effort (same fetchCurrentLocation pattern as stops),
+    // then routed to a caption dialog before the photo is actually saved —
+    // agreed in session: receipts/landmarks lose context fast, so prompt
+    // immediately rather than relying on editing later.
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null && trip != null) {
             val savedPath = compressAndSavePhoto(context, uri)
-            if (savedPath != null) viewModel.addTripPhoto(tripId, savedPath)
+            if (savedPath != null) {
+                photoScope.launch {
+                    val loc = fetchCurrentLocation(context)
+                    pendingPhotoPath = savedPath
+                    pendingPhotoLat = loc?.first
+                    pendingPhotoLng = loc?.second
+                    showPhotoCaptionDialog = true
+                }
+            }
         }
     }
 
@@ -132,7 +151,15 @@ fun TripDetailScreen(
         val uri = pendingCaptureUri
         if (success && uri != null && trip != null) {
             val savedPath = compressAndSavePhoto(context, uri)
-            if (savedPath != null) viewModel.addTripPhoto(tripId, savedPath)
+            if (savedPath != null) {
+                photoScope.launch {
+                    val loc = fetchCurrentLocation(context)
+                    pendingPhotoPath = savedPath
+                    pendingPhotoLat = loc?.first
+                    pendingPhotoLng = loc?.second
+                    showPhotoCaptionDialog = true
+                }
+            }
         }
         pendingCaptureUri = null
     }
@@ -364,6 +391,39 @@ fun TripDetailScreen(
         )
     }
 
+    if (showPhotoCaptionDialog && trip != null && pendingPhotoPath != null) {
+        var caption by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = {
+                viewModel.addTripPhoto(tripId, pendingPhotoPath!!, pendingPhotoLat, pendingPhotoLng, null)
+                showPhotoCaptionDialog = false
+                pendingPhotoPath = null
+            },
+            title = { Text("Add a note? (optional)") },
+            text = {
+                OutlinedTextField(
+                    value = caption, onValueChange = { caption = it },
+                    label = { Text("e.g. restaurant, landmark, receipt") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.addTripPhoto(tripId, pendingPhotoPath!!, pendingPhotoLat, pendingPhotoLng, caption.ifBlank { null })
+                    showPhotoCaptionDialog = false
+                    pendingPhotoPath = null
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.addTripPhoto(tripId, pendingPhotoPath!!, pendingPhotoLat, pendingPhotoLng, null)
+                    showPhotoCaptionDialog = false
+                    pendingPhotoPath = null
+                }) { Text("Skip") }
+            }
+        )
+    }
+
     if (showStopDialog && trip != null) {
         AddStopDialog(
             existingNote = editingNote,
@@ -413,12 +473,12 @@ fun TripDetailScreen(
             defaultDate   = dayNoteTargetDate,
             availableVoiceNotes = tripVoiceNotes,
             onDismiss    = { showDayNoteDialog = false; editingDayNote = null },
-            onConfirm    = { date, text, voiceNoteId ->
+            onConfirm    = { date, text, mood, voiceNoteId ->
                 val existing = editingDayNote
                 if (existing != null) {
-                    viewModel.updateDayNote(existing.entryId, text, voiceNoteId)
+                    viewModel.updateDayNote(existing.entryId, text, mood, voiceNoteId)
                 } else {
-                    viewModel.addDayNote(tripId, date, text, voiceNoteId)
+                    viewModel.addDayNote(tripId, date, text, mood, voiceNoteId)
                 }
                 showDayNoteDialog = false
                 editingDayNote = null
@@ -585,12 +645,17 @@ private fun DayNoteDialog(
     defaultDate: String,
     availableVoiceNotes: List<VoiceNoteEntity>,
     onDismiss: () -> Unit,
-    onConfirm: (date: String, text: String, voiceNoteId: String?) -> Unit
+    onConfirm: (date: String, text: String, mood: String?, voiceNoteId: String?) -> Unit
 ) {
     val isEditing = existingNote != null
     var date by remember { mutableStateOf(existingNote?.date ?: defaultDate) }
     var text by remember { mutableStateOf(existingNote?.text ?: "") }
+    var selectedMood by remember { mutableStateOf(existingNote?.mood) }
     var selectedVoiceNoteId by remember { mutableStateOf(existingNote?.voiceNoteId) }
+
+    // Mood is captured once per day, not per-stop — agreed in session:
+    // nobody rates their mood at a charging stop, they rate the day.
+    val moods = listOf("😊", "😍", "🤩", "😴", "😢")
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -609,6 +674,27 @@ private fun DayNoteDialog(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Mood (optional)", fontSize = 12.sp, color = T.Muted)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row {
+                    moods.forEach { emoji ->
+                        val isSelected = selectedMood == emoji
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .clickable { selectedMood = if (isSelected) null else emoji }
+                                .border(
+                                    width = if (isSelected) 2.dp else T.ruleThickness,
+                                    color = if (isSelected) T.Ink else T.Rule,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .padding(8.dp)
+                        ) {
+                            Text(text = emoji, fontSize = 20.sp)
+                        }
+                    }
+                }
                 if (availableVoiceNotes.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("Link a voice note (optional)", fontSize = 12.sp, color = T.Muted)
@@ -636,7 +722,7 @@ private fun DayNoteDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                if (text.isNotBlank()) onConfirm(date, text, selectedVoiceNoteId)
+                if (text.isNotBlank()) onConfirm(date, text, selectedMood, selectedVoiceNoteId)
             }) { Text(if (isEditing) "Update" else "Save") }
         },
         dismissButton = {
@@ -669,6 +755,10 @@ private fun DayNoteRow(
                 Icon(Icons.Filled.Notes, contentDescription = null, tint = T.Muted, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Day note", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = T.Ink)
+                if (dayNote.mood != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = dayNote.mood, fontSize = 14.sp)
+                }
             }
             Row {
                 Text("Edit", fontSize = 11.sp, color = T.Ink, modifier = Modifier.clickable { onEdit() })
@@ -883,6 +973,32 @@ private fun compressAndSavePhoto(context: android.content.Context, sourceUri: an
         FileOutputStream(outFile).use { out ->
             resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
         }
+
+        // Also save to the phone's camera roll (Pictures/VitaNest) — best
+        // effort, never blocks the app-local save. Agreed in session: gives
+        // a backup independent of the app during Norway (phone backup apps
+        // like Google Photos pick these up automatically), on top of the
+        // daily JSON export.
+        try {
+            val resolver = context.contentResolver
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, outFile.name)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/VitaNest")
+                }
+            }
+            val rollUri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            if (rollUri != null) {
+                resolver.openOutputStream(rollUri)?.use { out ->
+                    resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                }
+            }
+        } catch (e: Exception) {
+            // Best-effort only — camera-roll backup failing must never
+            // block the trip photo save itself.
+        }
+
         outFile.absolutePath
     } catch (e: Exception) {
         null
@@ -1278,34 +1394,39 @@ private fun AddStopDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                val (lat, lon) = gpsCoords ?: (0.0 to 0.0)
-                val parsedTimeMillis = try {
-                    java.time.LocalDateTime.parse(chargeTimeText, timeFormatter)
-                        .atZone(java.time.ZoneId.systemDefault())
-                        .toInstant()
-                        .toEpochMilli()
-                } catch (e: Exception) {
-                    null // invalid text — falls back to "now" at the call site rather than blocking save
+            var hasConfirmed by remember { mutableStateOf(false) }
+            TextButton(
+                enabled = !hasConfirmed,
+                onClick = {
+                    hasConfirmed = true
+                    val (lat, lon) = gpsCoords ?: (0.0 to 0.0)
+                    val parsedTimeMillis = try {
+                        java.time.LocalDateTime.parse(chargeTimeText, timeFormatter)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toInstant()
+                            .toEpochMilli()
+                    } catch (e: Exception) {
+                        null // invalid text — falls back to "now" at the call site rather than blocking save
+                    }
+                    val resolvedCurrency = when {
+                        vehicleType == "none" -> null
+                        currency == "Other"    -> customCurrency.ifBlank { null }
+                        else                    -> currency
+                    }
+                    onConfirm(
+                        location.ifBlank { null },
+                        lat,
+                        lon,
+                        if (vehicleType == "none") null else quantity.toDoubleOrNull(),
+                        if (vehicleType == "none") null else cost.toDoubleOrNull(),
+                        resolvedCurrency,
+                        parsedTimeMillis,
+                        duration.toIntOrNull(),
+                        odometer.toDoubleOrNull(),
+                        notes.ifBlank { null }
+                    )
                 }
-                val resolvedCurrency = when {
-                    vehicleType == "none" -> null
-                    currency == "Other"    -> customCurrency.ifBlank { null }
-                    else                    -> currency
-                }
-                onConfirm(
-                    location.ifBlank { null },
-                    lat,
-                    lon,
-                    if (vehicleType == "none") null else quantity.toDoubleOrNull(),
-                    if (vehicleType == "none") null else cost.toDoubleOrNull(),
-                    resolvedCurrency,
-                    parsedTimeMillis,
-                    duration.toIntOrNull(),
-                    odometer.toDoubleOrNull(),
-                    notes.ifBlank { null }
-                )
-            }) { Text(if (isEditing) "Update" else "Save") }
+            ) { Text(if (isEditing) "Update" else "Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

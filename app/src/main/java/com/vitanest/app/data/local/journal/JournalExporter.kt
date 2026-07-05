@@ -126,6 +126,7 @@ object JournalExporter {
         put("entryId", d.entryId)
         put("date", d.date)
         put("text", d.text)
+        put("mood", d.mood)
         put("voiceNoteId", d.voiceNoteId)
     }
 
@@ -140,6 +141,9 @@ object JournalExporter {
     private fun photoToJson(p: TripPhotoEntity) = JSONObject().apply {
         put("id", p.id)
         put("uri", p.uri)
+        put("latitude", p.latitude)
+        put("longitude", p.longitude)
+        put("notes", p.notes)
         put("createdAt", p.createdAt)
     }
 }

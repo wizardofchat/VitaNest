@@ -15,7 +15,7 @@ import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
-    private const val BASE_URL = "http://100.69.38.81:8000/"
+    private const val BASE_URL = VitaClawConfig.BASE_URL
 
     private val json = Json {
         ignoreUnknownKeys = true

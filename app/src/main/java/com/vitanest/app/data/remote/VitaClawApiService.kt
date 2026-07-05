@@ -35,7 +35,9 @@ import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.Streaming
@@ -1331,6 +1333,28 @@ interface VitaClawApiService {
         @Query("sort")     sort:     String? = null
     ): Response<BankingTransactionsResponse>
 
+    // ── Trip Journal Sync ─────────────────────────────────────
+    // Metadata batch upsert — trips/trip_notes/day_notes/voice_notes.
+    // Per-record status, not all-or-nothing (see TripSyncResponse).
+
+    @POST("trip/sync")
+    suspend fun syncTripJournal(@Body request: TripSyncRequest): Response<TripSyncResponse>
+
+    // Single-file upload — one call per photo/voice note. latitude/
+    // longitude/notes apply to kind=trip_photo only; accepted-but-ignored
+    // for kind=voice_note per VitaClaw confirmation 2026-07-05.
+    @Multipart
+    @POST("trip/media")
+    suspend fun uploadTripMedia(
+        @Part("kind") kind: okhttp3.RequestBody,
+        @Part("id") id: okhttp3.RequestBody,
+        @Part("trip_id") tripId: okhttp3.RequestBody,
+        @Part("latitude") latitude: okhttp3.RequestBody? = null,
+        @Part("longitude") longitude: okhttp3.RequestBody? = null,
+        @Part("notes") notes: okhttp3.RequestBody? = null,
+        @Part file: okhttp3.MultipartBody.Part
+    ): Response<TripMediaResponse>
+
 }
 
 // ── Trade feedback response ───────────────────────────────────
@@ -1458,4 +1482,102 @@ data class BankingTransactionsResponse(
     @SerialName("total_gbp")         val totalGbp: Double,
     @SerialName("transaction_count") val transactionCount: Int,
     val transactions: List<BankingTransaction> = emptyList()
+)
+
+// ── Trip Journal Sync models ──────────────────────────────────
+// Maps local Room entities (TripEntity/TripNoteEntity/DayNoteEntity/
+// VoiceNoteEntity) to the /trip/sync + /trip/media contract shape.
+// snake_case on the wire, camelCase locally — SerialName bridges it.
+// chargeStartTime converts epoch millis -> ISO8601 string at the
+// mapper layer, not here (this is just the wire shape).
+
+@Serializable
+data class SyncTripPayload(
+    @SerialName("trip_id") val tripId: String,
+    val name: String,
+    @SerialName("vehicle_type") val vehicleType: String,
+    @SerialName("fuel_type") val fuelType: String? = null,
+    @SerialName("start_date") val startDate: String,
+    @SerialName("end_date") val endDate: String? = null,
+    val status: String,
+    @SerialName("flight_origin") val flightOrigin: String? = null,
+    @SerialName("flight_destination") val flightDestination: String? = null,
+    val deleted: Boolean = false
+)
+
+@Serializable
+data class SyncTripNotePayload(
+    @SerialName("entry_id") val entryId: String,
+    @SerialName("trip_id") val tripId: String,
+    @SerialName("location_name") val locationName: String? = null,
+    val latitude: Double,
+    val longitude: Double,
+    val quantity: Double? = null,
+    @SerialName("local_cost") val localCost: Double? = null,
+    @SerialName("local_currency") val localCurrency: String? = null,
+    @SerialName("rate_per_unit_local") val ratePerUnitLocal: Double? = null,
+    @SerialName("charge_start_time") val chargeStartTime: String? = null, // ISO8601
+    @SerialName("duration_minutes") val durationMinutes: Int? = null,
+    @SerialName("odometer_km") val odometerKm: Double? = null,
+    @SerialName("voice_note_id") val voiceNoteId: String? = null,
+    val deleted: Boolean = false,
+    val source: String = "manual",
+    val notes: String? = null
+)
+
+@Serializable
+data class SyncDayNotePayload(
+    @SerialName("entry_id") val entryId: String,
+    @SerialName("trip_id") val tripId: String,
+    val date: String,
+    val text: String,
+    val mood: String? = null,
+    @SerialName("voice_note_id") val voiceNoteId: String? = null,
+    val deleted: Boolean = false
+)
+
+@Serializable
+data class SyncVoiceNotePayload(
+    @SerialName("note_id") val noteId: String,
+    @SerialName("trip_id") val tripId: String? = null,
+    @SerialName("duration_seconds") val durationSeconds: Int? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val deleted: Boolean = false
+)
+
+@Serializable
+data class TripSyncRequest(
+    val trips: List<SyncTripPayload> = emptyList(),
+    @SerialName("trip_notes") val tripNotes: List<SyncTripNotePayload> = emptyList(),
+    @SerialName("day_notes") val dayNotes: List<SyncDayNotePayload> = emptyList(),
+    @SerialName("voice_notes") val voiceNotes: List<SyncVoiceNotePayload> = emptyList()
+)
+
+@Serializable
+data class SyncRecordStatus(
+    val id: String,
+    val status: String,   // "ok" | "error"
+    val error: String? = null
+)
+
+@Serializable
+data class TripSyncResponse(
+    val trips: List<SyncRecordStatus> = emptyList(),
+    @SerialName("trip_notes") val tripNotes: List<SyncRecordStatus> = emptyList(),
+    @SerialName("day_notes") val dayNotes: List<SyncRecordStatus> = emptyList(),
+    @SerialName("voice_notes") val voiceNotes: List<SyncRecordStatus> = emptyList(),
+    @SerialName("trips_synced") val tripsSynced: Int = 0,
+    @SerialName("trip_notes_synced") val tripNotesSynced: Int = 0,
+    @SerialName("day_notes_synced") val dayNotesSynced: Int = 0,
+    @SerialName("voice_notes_synced") val voiceNotesSynced: Int = 0
+)
+
+@Serializable
+data class TripMediaResponse(
+    val id: String,
+    val kind: String,
+    val status: String,
+    @SerialName("file_path") val filePath: String? = null,
+    val error: String? = null
 )

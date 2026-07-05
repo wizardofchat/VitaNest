@@ -14,20 +14,20 @@ import androidx.room.PrimaryKey
  */
 @Entity(tableName = "trips")
 data class TripEntity(
-    @PrimaryKey val tripId: String,       // client-generated UUID, sync key
+    @PrimaryKey val tripId: String,
     val name: String,
-    val vehicleType: String,               // "electric" | "ice" | "none"
-    val fuelType: String? = null,          // nullable, ICE only e.g. petrol/diesel
-    val startDate: String,                 // ISO date "YYYY-MM-DD"
-    val endDate: String? = null,           // null while active
-    val status: String,                    // "active" | "completed"
-    val flightOrigin: String? = null,      // nullable, e.g. "BFS"
-    val flightDestination: String? = null, // nullable, e.g. "OSL"
-    val carRegistration: String? = null,   // nullable, e.g. "EK67 ABC" — hire car reg, useful for roadside assistance
-    val deleted: Boolean = false,          // soft delete — carries intent through to sync
-    val createdAt: Long,                   // epoch millis
+    val vehicleType: String,
+    val fuelType: String? = null,
+    val startDate: String,
+    val endDate: String? = null,
+    val status: String,
+    val flightOrigin: String? = null,
+    val flightDestination: String? = null,
+    val carRegistration: String? = null,
+    val deleted: Boolean = false,
+    val createdAt: Long,
     val updatedAt: Long,
-    val synced: Boolean = false            // local-only flag, not sent to server
+    val synced: Boolean = false
 )
 
 /**
@@ -38,23 +38,23 @@ data class TripEntity(
  */
 @Entity(tableName = "trip_notes")
 data class TripNoteEntity(
-    @PrimaryKey val entryId: String,       // client-generated UUID, sync key
-    val tripId: String,                    // FK -> TripEntity.tripId
-    val locationName: String? = null,      // reverse-geocoded, nullable — best effort only
+    @PrimaryKey val entryId: String,
+    val tripId: String,
+    val locationName: String? = null,
     val latitude: Double,
     val longitude: Double,
-    val quantity: Double? = null,          // kWh or litres, per trip.vehicleType
+    val quantity: Double? = null,
     val localCost: Double? = null,
-    val localCurrency: String? = null,     // e.g. "NOK" — entered as-is, no FX lookup on device
-    val costGbp: Double? = null,           // left null; VitaClaw backfills via existing FX infra
-    val ratePerUnitLocal: Double? = null,  // computed client-side: localCost / quantity
-    val chargeStartTime: Long? = null,     // epoch millis — day grouping key, dynamic on edit
-    val durationMinutes: Int? = null,      // nullable — mainly meaningful for electric
+    val localCurrency: String? = null,
+    val costGbp: Double? = null,
+    val ratePerUnitLocal: Double? = null,
+    val chargeStartTime: Long? = null,
+    val durationMinutes: Int? = null,
     val odometerKm: Double? = null,
-    val notes: String? = null,             // free-text, e.g. handy day notes when voice note isn't practical
-    val voiceNoteId: String? = null,       // soft reference -> VoiceNoteEntity.noteId, no FK constraint
-    val deleted: Boolean = false,          // soft delete — carries intent through to sync
-    val source: String = "manual",         // "manual" | "voice_transcribed"
+    val notes: String? = null,
+    val voiceNoteId: String? = null,
+    val deleted: Boolean = false,
+    val source: String = "manual",
     val createdAt: Long,
     val updatedAt: Long,
     val synced: Boolean = false
@@ -66,13 +66,13 @@ data class TripNoteEntity(
  */
 @Entity(tableName = "voice_notes")
 data class VoiceNoteEntity(
-    @PrimaryKey val noteId: String,        // client-generated UUID, sync key
-    val tripId: String? = null,            // nullable — standalone by default
-    val audioPath: String,                 // local file path, required at insert
+    @PrimaryKey val noteId: String,
+    val tripId: String? = null,
+    val audioPath: String,
     val durationSeconds: Int? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val transcript: String? = null,        // always null on-device — VitaClaw's Whisper agent fills this
+    val transcript: String? = null,
     val transcribedAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
@@ -84,14 +84,18 @@ data class VoiceNoteEntity(
  * stops — a day can have a note with zero stops, or stops with no note.
  * Day grouping on the UI side is derived (group stops/notes by date), not
  * stored — this row's `date` field IS the grouping key for itself.
+ *
+ * mood is captured once per day (not per-stop) — agreed in session: nobody
+ * rates their mood at a charging stop, they rate the day.
  */
 @Entity(tableName = "day_notes")
 data class DayNoteEntity(
-    @PrimaryKey val entryId: String,       // client-generated UUID, sync key
-    val tripId: String,                    // FK -> TripEntity.tripId
-    val date: String,                      // ISO date "YYYY-MM-DD"
+    @PrimaryKey val entryId: String,
+    val tripId: String,
+    val date: String,
     val text: String,
-    val voiceNoteId: String? = null,       // soft reference -> VoiceNoteEntity.noteId
+    val mood: String? = null,          // NEW — emoji string, nullable
+    val voiceNoteId: String? = null,
     val deleted: Boolean = false,
     val createdAt: Long,
     val updatedAt: Long,
@@ -100,13 +104,18 @@ data class DayNoteEntity(
 
 /**
  * A photo attached at trip level (not per-day, not per-stop) — deliberately
- * flat. Gallery-picker only for now; camera capture deferred post-trip.
+ * flat. Agreed in session: photos live at trip level only, matched to stops
+ * later (if ever) via GPS/timestamp on the VitaClaw side — no client-side
+ * distance calculation.
  */
 @Entity(tableName = "trip_photos")
 data class TripPhotoEntity(
-    @PrimaryKey val id: String,            // client-generated UUID, sync key
-    val tripId: String,                    // FK -> TripEntity.tripId
-    val uri: String,                       // local content:// or file:// URI
+    @PrimaryKey val id: String,
+    val tripId: String,
+    val uri: String,
+    val latitude: Double? = null,      // NEW
+    val longitude: Double? = null,     // NEW
+    val notes: String? = null,         // NEW — e.g. receipt/landmark caption
     val deleted: Boolean = false,
     val createdAt: Long,
     val updatedAt: Long,
