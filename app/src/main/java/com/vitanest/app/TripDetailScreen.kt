@@ -266,6 +266,29 @@ fun TripDetailScreen(
                     Text("Export / Share backup", fontSize = 13.sp, color = T.Ink)
                 }
 
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = { viewModel.syncNow(tripId) },
+                    enabled = !vmUiState.isSyncing,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = if (vmUiState.isSyncing) "Syncing..." else "Sync now",
+                        fontSize = 13.sp,
+                        color = T.Ink
+                    )
+                }
+
+                if (vmUiState.lastSyncResult != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = vmUiState.lastSyncResult ?: "",
+                        fontSize = 11.sp,
+                        color = T.Muted
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
                 if (photos.isNotEmpty()) {

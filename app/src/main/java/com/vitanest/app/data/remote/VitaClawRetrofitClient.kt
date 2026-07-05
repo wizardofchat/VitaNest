@@ -21,6 +21,13 @@ object RetrofitClient {
         ignoreUnknownKeys = true
         coerceInputValues = true
         isLenient = true
+        // encodeDefaults=true is required: without it, any field carrying
+        // its Kotlin default value (source="manual", deleted=false, etc.)
+        // is silently omitted from the outgoing JSON. VitaClaw's Pydantic
+        // models mark several of those fields as required, causing 422s
+        // that look like missing data when the data was actually just
+        // never sent. Root cause of the 2026-07-05 trip/sync 422 failures.
+        encodeDefaults = true
     }
 
     private val okHttpClient = OkHttpClient.Builder()

@@ -19,6 +19,8 @@ import com.vitanest.app.data.local.journal.TripEntity
 import com.vitanest.app.data.local.journal.TripNoteEntity
 import com.vitanest.app.data.local.journal.TripPhotoEntity
 import com.vitanest.app.data.local.journal.VoiceNoteEntity
+import com.vitanest.app.data.remote.JournalSyncManager
+import com.vitanest.app.data.remote.SyncResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +37,12 @@ data class JournalUiState(
     val recentVoiceNotes: List<VoiceNoteEntity> = emptyList(),
     val activeTripStopCount: Int                = 0,
     val isRecording:      Boolean               = false,
+    val isSyncing:        Boolean               = false,
+    val lastSyncResult:   String?               = null,
+    // False until the first combine() emission lands. Recording must be
+    // blocked while this is false — otherwise activeTrip reads as null
+    // even when a trip IS active, and the voice note saves untagged
+    // (root cause of the "voice notes missing from TripDetailScreen" bug).
     val isReady:          Boolean               = false
 )
 
@@ -96,6 +104,10 @@ class JournalViewModel(
 
     // ── Trips ────────────────────────────────────────────────
 
+    /**
+     * vehicleType: "electric" | "ice" | "none". fuelType only meaningful for "ice".
+     * flightOrigin/flightDestination are both nullable — not every trip flies.
+     */
     fun startTrip(
         name: String,
         vehicleType: String,
@@ -107,7 +119,7 @@ class JournalViewModel(
     ) {
         viewModelScope.launch {
             val existing = repository.getActiveTrip()
-            if (existing != null) return@launch
+            if (existing != null) return@launch // UI should block this via canStartNewTrip
 
             val now = System.currentTimeMillis()
             repository.upsertTrip(
@@ -129,6 +141,7 @@ class JournalViewModel(
         }
     }
 
+    /** Edit trip header fields post-creation. Status/dates untouched here — use endTrip() for status. */
     fun updateTripDetails(
         tripId: String,
         name: String,
@@ -176,6 +189,9 @@ class JournalViewModel(
     fun canStartNewTrip(): Boolean = _uiState.value.activeTrip == null
 
     // ── Trip stops ───────────────────────────────────────────
+    // Note: when trip.vehicleType == "none", quantity/localCost/localCurrency
+    // are expected to arrive null from the UI — this layer doesn't enforce it,
+    // the Add Stop form is responsible for hiding those fields in that case.
 
     fun addTripStop(
         tripId: String,
@@ -199,20 +215,22 @@ class JournalViewModel(
 
             repository.upsertStop(
                 TripNoteEntity(
-                    entryId          = UUID.randomUUID().toString(),
-                    tripId           = tripId,
-                    locationName      = locationName,
-                    latitude         = latitude,
-                    longitude        = longitude,
-                    quantity          = quantity,
-                    localCost        = localCost,
-                    localCurrency     = localCurrency,
-                    ratePerUnitLocal = rate,
-                    chargeStartTime   = chargeStartTime,
-                    durationMinutes  = durationMinutes,
-                    odometerKm       = odometerKm,
-                    notes             = notes,
-                    voiceNoteId       = voiceNoteId,
+                    entryId            = UUID.randomUUID().toString(),
+                    tripId             = tripId,
+                    locationName        = locationName,
+                    latitude            = latitude,
+                    longitude           = longitude,
+                    quantity            = quantity,
+                    localCost           = localCost,
+                    localCurrency       = localCurrency,
+                    costGbp             = null, // resolved by VitaClaw at sync
+                    ratePerUnitLocal    = rate,
+                    chargeStartTime     = chargeStartTime ?: now, // falls back to now only if the entered time text failed to parse
+                    durationMinutes     = durationMinutes,
+                    odometerKm           = odometerKm,
+                    notes                = notes,
+                    voiceNoteId          = voiceNoteId,
+                    source               = if (voiceNoteId != null) "voice_transcribed" else "manual",
                     createdAt            = now,
                     updatedAt            = now
                 )
@@ -252,6 +270,10 @@ class JournalViewModel(
                     localCost          = localCost,
                     localCurrency      = localCurrency,
                     ratePerUnitLocal   = rate,
+                    // Dynamic day grouping: editing chargeStartTime to a new
+                    // date moves this stop to that day's card on next
+                    // recompose — grouping is derived from this field, not
+                    // separately stored, so no extra logic is needed here.
                     chargeStartTime    = chargeStartTime ?: existing.chargeStartTime,
                     durationMinutes    = durationMinutes,
                     odometerKm         = odometerKm,
@@ -264,8 +286,9 @@ class JournalViewModel(
     }
 
     // ── Day notes ────────────────────────────────────────────
+    // mood: nullable emoji string — captured once per day, not per-stop
+    // (agreed in session: nobody rates mood at a charging stop).
 
-    /** mood: nullable emoji string, e.g. "😊" — captured once per day, not per-stop. */
     fun addDayNote(tripId: String, date: String, text: String, mood: String?, voiceNoteId: String?) {
         viewModelScope.launch {
             val now = System.currentTimeMillis()
@@ -306,10 +329,8 @@ class JournalViewModel(
     // ── Trip photos ──────────────────────────────────────────
     // latitude/longitude: best-effort GPS captured at add-time (same
     // fetchCurrentLocation pattern as stops) — null if permission denied
-    // or fetch fails/times out, never blocks the save.
-    // notes: optional caption prompted immediately after capture (receipt,
-    // landmark, restaurant name) — skippable. Edit-later not implemented;
-    // DAO has no single-photo getter yet — add one if that's wanted.
+    // or fetch fails, never blocks the save.
+    // notes: optional caption prompted immediately after capture.
 
     fun addTripPhoto(tripId: String, uri: String, latitude: Double?, longitude: Double?, notes: String?) {
         viewModelScope.launch {
@@ -333,10 +354,32 @@ class JournalViewModel(
         viewModelScope.launch { repository.softDeletePhoto(id) }
     }
 
+    // ── Sync ─────────────────────────────────────────────────
+    // Manual trigger only for this pass — debounced auto-sync on
+    // local writes / network-restore is separate, not built yet.
+
+    private val syncManager = JournalSyncManager(repository)
+
+    fun syncNow(tripId: String) {
+        if (_uiState.value.isSyncing) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSyncing = true, lastSyncResult = null)
+            val result = syncManager.syncNow(tripId)
+            val message = when (result) {
+                is SyncResult.Success -> "Synced ${result.metadataSynced} records, ${result.mediaSynced} photos"
+                is SyncResult.Failure -> "Sync failed: ${result.reason}"
+            }
+            _uiState.value = _uiState.value.copy(isSyncing = false, lastSyncResult = message)
+        }
+    }
+
     // ── Voice notes ──────────────────────────────────────────
 
     fun startRecording(tripId: String?) {
         if (_uiState.value.isRecording) return
+        // Guard against the untagged-voice-note bug: if uiState hasn't
+        // emitted yet, activeTrip reads as null even when a trip IS
+        // active. Block recording rather than risk a silent mistag.
         if (!_uiState.value.isReady) return
 
         val dir = File(appContext.filesDir, "voice_notes").apply { mkdirs() }
@@ -356,6 +399,7 @@ class JournalViewModel(
         currentRecordingStartMs = System.currentTimeMillis()
         _uiState.value = _uiState.value.copy(isRecording = true)
 
+        // tripId is consumed in stopRecording via closure capture below
         pendingTripId = tripId
     }
 
@@ -366,6 +410,8 @@ class JournalViewModel(
         try {
             recorder?.stop()
         } catch (e: Exception) {
+            // stop() throws if called too soon after start() with no data —
+            // discard the file rather than saving a corrupt/empty note.
             File(path).delete()
             resetRecordingState()
             return
@@ -396,7 +442,7 @@ class JournalViewModel(
     }
 
     fun cancelRecording() {
-        try { recorder?.stop() } catch (_: Exception) { }
+        try { recorder?.stop() } catch (_: Exception) { /* no-op — discarding anyway */ }
         recorder?.release()
         recorder = null
         currentRecordingPath?.let { File(it).delete() }
@@ -412,6 +458,8 @@ class JournalViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        // Safety net — don't leak a MediaRecorder if the ViewModel is torn
+        // down mid-recording (e.g. process death).
         try { recorder?.release() } catch (_: Exception) { }
     }
 }

@@ -47,6 +47,29 @@ interface JournalRepository {
     suspend fun upsertPhoto(photo: TripPhotoEntity)
     suspend fun softDeletePhoto(id: String)
     suspend fun countPhotosForTrip(tripId: String): Int
+
+    // Sync support — dirty-flag reads + per-record synced marking.
+    // JournalSyncManager is the only caller; ViewModel has no reason
+    // to touch these.
+    suspend fun getUnsyncedTrips(): List<TripEntity>
+    suspend fun getUnsyncedStops(): List<TripNoteEntity>
+    suspend fun getUnsyncedDayNotes(): List<DayNoteEntity>
+    suspend fun getUnsyncedVoiceNotes(): List<VoiceNoteEntity>
+    suspend fun getUnsyncedPhotos(): List<TripPhotoEntity>
+
+    // Trip-scoped variants — sync must operate on the current trip only,
+    // not every unsynced row across every trip ever created locally.
+    suspend fun getUnsyncedTrip(tripId: String): List<TripEntity>
+    suspend fun getUnsyncedStopsForTrip(tripId: String): List<TripNoteEntity>
+    suspend fun getUnsyncedDayNotesForTrip(tripId: String): List<DayNoteEntity>
+    suspend fun getUnsyncedVoiceNotesForTrip(tripId: String): List<VoiceNoteEntity>
+    suspend fun getUnsyncedPhotosForTrip(tripId: String): List<TripPhotoEntity>
+
+    suspend fun markTripSynced(tripId: String)
+    suspend fun markStopSynced(entryId: String)
+    suspend fun markDayNoteSynced(entryId: String)
+    suspend fun markVoiceNoteSynced(noteId: String)
+    suspend fun markPhotoSynced(id: String)
 }
 
 /**
@@ -97,4 +120,24 @@ class LocalJournalRepository(private val db: JournalDatabase) : JournalRepositor
     override suspend fun softDeletePhoto(id: String) =
         tripPhotoDao.softDelete(id, System.currentTimeMillis())
     override suspend fun countPhotosForTrip(tripId: String) = tripPhotoDao.countForTrip(tripId)
+
+    // ── Sync support ─────────────────────────────────────────
+
+    override suspend fun getUnsyncedTrips() = tripDao.getUnsyncedTrips()
+    override suspend fun getUnsyncedStops() = tripNoteDao.getUnsyncedNotes()
+    override suspend fun getUnsyncedDayNotes() = dayNoteDao.getUnsyncedNotes()
+    override suspend fun getUnsyncedVoiceNotes() = voiceNoteDao.getUnsyncedVoiceNotes()
+    override suspend fun getUnsyncedPhotos() = tripPhotoDao.getUnsyncedPhotos()
+
+    override suspend fun getUnsyncedTrip(tripId: String) = tripDao.getUnsyncedTrip(tripId)
+    override suspend fun getUnsyncedStopsForTrip(tripId: String) = tripNoteDao.getUnsyncedNotesForTrip(tripId)
+    override suspend fun getUnsyncedDayNotesForTrip(tripId: String) = dayNoteDao.getUnsyncedNotesForTrip(tripId)
+    override suspend fun getUnsyncedVoiceNotesForTrip(tripId: String) = voiceNoteDao.getUnsyncedVoiceNotesForTrip(tripId)
+    override suspend fun getUnsyncedPhotosForTrip(tripId: String) = tripPhotoDao.getUnsyncedPhotosForTrip(tripId)
+
+    override suspend fun markTripSynced(tripId: String) = tripDao.markSynced(tripId)
+    override suspend fun markStopSynced(entryId: String) = tripNoteDao.markSynced(entryId)
+    override suspend fun markDayNoteSynced(entryId: String) = dayNoteDao.markSynced(entryId)
+    override suspend fun markVoiceNoteSynced(noteId: String) = voiceNoteDao.markSynced(noteId)
+    override suspend fun markPhotoSynced(id: String) = tripPhotoDao.markSynced(id)
 }

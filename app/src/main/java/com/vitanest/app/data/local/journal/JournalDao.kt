@@ -39,6 +39,12 @@ interface TripDao {
 
     @Query("SELECT * FROM trips WHERE synced = 0")
     suspend fun getUnsyncedTrips(): List<TripEntity>
+
+    @Query("SELECT * FROM trips WHERE tripId = :tripId AND synced = 0")
+    suspend fun getUnsyncedTrip(tripId: String): List<TripEntity>
+
+    @Query("UPDATE trips SET synced = 1 WHERE tripId = :tripId")
+    suspend fun markSynced(tripId: String)
 }
 
 @Dao
@@ -63,11 +69,17 @@ interface TripNoteDao {
     @Query("SELECT * FROM trip_notes WHERE synced = 0")
     suspend fun getUnsyncedNotes(): List<TripNoteEntity>
 
+    @Query("SELECT * FROM trip_notes WHERE tripId = :tripId AND synced = 0")
+    suspend fun getUnsyncedNotesForTrip(tripId: String): List<TripNoteEntity>
+
     @Query("SELECT COUNT(*) FROM trip_notes WHERE tripId = :tripId AND deleted = 0")
     suspend fun countForTrip(tripId: String): Int
 
     @Query("SELECT COUNT(*) FROM trip_notes WHERE tripId = :tripId AND deleted = 0")
     fun observeCountForTrip(tripId: String): Flow<Int>
+
+    @Query("UPDATE trip_notes SET synced = 1 WHERE entryId = :entryId")
+    suspend fun markSynced(entryId: String)
 }
 
 @Dao
@@ -90,6 +102,12 @@ interface VoiceNoteDao {
 
     @Query("SELECT * FROM voice_notes WHERE synced = 0")
     suspend fun getUnsyncedVoiceNotes(): List<VoiceNoteEntity>
+
+    @Query("SELECT * FROM voice_notes WHERE tripId = :tripId AND synced = 0")
+    suspend fun getUnsyncedVoiceNotesForTrip(tripId: String): List<VoiceNoteEntity>
+
+    @Query("UPDATE voice_notes SET synced = 1 WHERE noteId = :noteId")
+    suspend fun markSynced(noteId: String)
 }
 
 @Dao
@@ -112,6 +130,12 @@ interface DayNoteDao {
 
     @Query("SELECT * FROM day_notes WHERE synced = 0")
     suspend fun getUnsyncedNotes(): List<DayNoteEntity>
+
+    @Query("SELECT * FROM day_notes WHERE tripId = :tripId AND synced = 0")
+    suspend fun getUnsyncedNotesForTrip(tripId: String): List<DayNoteEntity>
+
+    @Query("UPDATE day_notes SET synced = 1 WHERE entryId = :entryId")
+    suspend fun markSynced(entryId: String)
 }
 
 @Dao
@@ -128,6 +152,12 @@ interface TripPhotoDao {
 
     @Query("SELECT * FROM trip_photos WHERE synced = 0")
     suspend fun getUnsyncedPhotos(): List<TripPhotoEntity>
+
+    @Query("SELECT * FROM trip_photos WHERE tripId = :tripId AND synced = 0")
+    suspend fun getUnsyncedPhotosForTrip(tripId: String): List<TripPhotoEntity>
+
+    @Query("UPDATE trip_photos SET synced = 1 WHERE id = :id")
+    suspend fun markSynced(id: String)
 
     @Query("SELECT COUNT(*) FROM trip_photos WHERE tripId = :tripId AND deleted = 0")
     suspend fun countForTrip(tripId: String): Int
