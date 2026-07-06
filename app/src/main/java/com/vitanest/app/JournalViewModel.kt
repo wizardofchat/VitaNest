@@ -20,7 +20,9 @@ import com.vitanest.app.data.local.journal.TripNoteEntity
 import com.vitanest.app.data.local.journal.TripPhotoEntity
 import com.vitanest.app.data.local.journal.VoiceNoteEntity
 import com.vitanest.app.data.remote.JournalSyncManager
+import com.vitanest.app.data.remote.RetrofitClient
 import com.vitanest.app.data.remote.SyncResult
+import com.vitanest.app.data.remote.TravelSynthesisRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +41,10 @@ data class JournalUiState(
     val isRecording:      Boolean               = false,
     val isSyncing:        Boolean               = false,
     val lastSyncResult:   String?               = null,
+    val isSynthesizing:   Boolean               = false,
+    val synthesisJobId:   String?               = null,
+    val synthesisResult:  String?               = null,
+    val synthesisError:   String?               = null,
     // False until the first combine() emission lands. Recording must be
     // blocked while this is false — otherwise activeTrip reads as null
     // even when a trip IS active, and the voice note saves untagged
@@ -235,6 +241,7 @@ class JournalViewModel(
                     updatedAt            = now
                 )
             )
+            scheduleAutoSync(tripId)
         }
     }
 
@@ -282,6 +289,7 @@ class JournalViewModel(
                     synced              = false
                 )
             )
+            scheduleAutoSync(existing.tripId)
         }
     }
 
@@ -304,6 +312,7 @@ class JournalViewModel(
                     updatedAt   = now
                 )
             )
+            scheduleAutoSync(tripId)
         }
     }
 
@@ -319,6 +328,7 @@ class JournalViewModel(
                     synced      = false
                 )
             )
+            scheduleAutoSync(existing.tripId)
         }
     }
 
@@ -347,6 +357,7 @@ class JournalViewModel(
                     updatedAt = now
                 )
             )
+            scheduleAutoSync(tripId)
         }
     }
 
@@ -355,12 +366,37 @@ class JournalViewModel(
     }
 
     // ── Sync ─────────────────────────────────────────────────
-    // Manual trigger only for this pass — debounced auto-sync on
-    // local writes / network-restore is separate, not built yet.
+    // Auto-sync: debounced 3s after the last local write, fires silently
+    // (no UI toast) — failures are swallowed here since there's no manual
+    // action to react to; manual "Sync now" surfaces errors explicitly and
+    // remains the fallback for when auto-sync silently stalled (VitaClaw
+    // down, wifi dropped). Network-restore trigger NOT built — would need
+    // a ConnectivityManager.NetworkCallback registered/unregistered against
+    // ViewModel lifecycle; flagging as a real gap, not building it now.
 
     private val syncManager = JournalSyncManager(repository)
+    private var autoSyncJob: kotlinx.coroutines.Job? = null
+
+    private fun scheduleAutoSync(tripId: String) {
+        autoSyncJob?.cancel()
+        autoSyncJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(3000)
+            if (_uiState.value.isSyncing) return@launch
+            _uiState.value = _uiState.value.copy(isSyncing = true)
+            val result = syncManager.syncNow(tripId)
+            // Silent on success; only surface if it actually failed, since
+            // this fires automatically and shouldn't demand attention when
+            // everything's fine.
+            val message = when (result) {
+                is SyncResult.Success -> null
+                is SyncResult.Failure -> "Auto-sync failed: ${result.reason}"
+            }
+            _uiState.value = _uiState.value.copy(isSyncing = false, lastSyncResult = message ?: _uiState.value.lastSyncResult)
+        }
+    }
 
     fun syncNow(tripId: String) {
+        autoSyncJob?.cancel()
         if (_uiState.value.isSyncing) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSyncing = true, lastSyncResult = null)
@@ -371,6 +407,118 @@ class JournalViewModel(
             }
             _uiState.value = _uiState.value.copy(isSyncing = false, lastSyncResult = message)
         }
+    }
+
+    // ── Trip synthesis ───────────────────────────────────────
+    // Day-scoped only — always passes `date`. Full-trip mode (omitting
+    // date) is accepted by VitaClaw but not verified from VitaNest; not
+    // wired here. Sync-first is required: synthesis reads current
+    // VitaClaw DB state, so stale/unsynced local edits won't appear.
+
+    private val api = RetrofitClient.apiService
+
+    fun requestDaySynthesis(tripId: String, date: String) {
+        if (_uiState.value.isSynthesizing) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isSynthesizing = true,
+                synthesisResult = null,
+                synthesisError = null
+            )
+
+            // Sync first — synthesis reads VitaClaw's DB, not the phone.
+            val syncResult = syncManager.syncNow(tripId)
+            if (syncResult is SyncResult.Failure) {
+                _uiState.value = _uiState.value.copy(
+                    isSynthesizing = false,
+                    synthesisError = "Couldn't sync before generating: ${syncResult.reason}"
+                )
+                return@launch
+            }
+
+            try {
+                val queueResponse = api.requestTravelSynthesis(
+                    TravelSynthesisRequest(tripId = tripId, date = date)
+                )
+                val jobId = queueResponse.body()?.jobId
+                if (!queueResponse.isSuccessful || jobId == null) {
+                    _uiState.value = _uiState.value.copy(
+                        isSynthesizing = false,
+                        synthesisError = "Couldn't start synthesis (HTTP ${queueResponse.code()})"
+                    )
+                    return@launch
+                }
+                _uiState.value = _uiState.value.copy(synthesisJobId = jobId)
+
+                // Poll every 3s, ~90s timeout — observed job time is ~28-58s,
+                // so this gives headroom without polling forever if VitaClaw
+                // hangs.
+                var attempts = 0
+                val maxAttempts = 30
+                while (attempts < maxAttempts) {
+                    kotlinx.coroutines.delay(3000)
+                    attempts++
+
+                    val jobResponse = api.getSynthesisJob(jobId)
+                    val job = jobResponse.body()
+
+                    // A 404 early in polling can mean the job exists but
+                    // isn't queryable yet (VitaClaw-side race — flagged
+                    // separately). Only treat 404 as fatal after several
+                    // attempts; any other failure code fails immediately.
+                    if (!jobResponse.isSuccessful) {
+                        if (jobResponse.code() == 404 && attempts < 5) {
+                            continue
+                        }
+                        _uiState.value = _uiState.value.copy(
+                            isSynthesizing = false,
+                            synthesisError = "Lost connection while generating (job $jobId, HTTP ${jobResponse.code()})"
+                        )
+                        return@launch
+                    }
+                    if (job == null) {
+                        _uiState.value = _uiState.value.copy(
+                            isSynthesizing = false,
+                            synthesisError = "Empty response while generating (job $jobId)"
+                        )
+                        return@launch
+                    }
+
+                    when (job.status) {
+                        "done" -> {
+                            _uiState.value = _uiState.value.copy(
+                                isSynthesizing = false,
+                                synthesisResult = job.response
+                            )
+                            return@launch
+                        }
+                        "error" -> {
+                            _uiState.value = _uiState.value.copy(
+                                isSynthesizing = false,
+                                synthesisError = job.response ?: "Synthesis failed with no error detail"
+                            )
+                            return@launch
+                        }
+                        "pending" -> { /* keep polling */ }
+                        else -> { /* unknown status — keep polling, don't guess */ }
+                    }
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    isSynthesizing = false,
+                    synthesisError = "Timed out waiting for trip story (over 90s)"
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isSynthesizing = false,
+                    synthesisError = "Synthesis error: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun clearSynthesisResult() {
+        _uiState.value = _uiState.value.copy(synthesisResult = null, synthesisError = null)
     }
 
     // ── Voice notes ──────────────────────────────────────────
@@ -436,6 +584,7 @@ class JournalViewModel(
                     updatedAt        = now
                 )
             )
+            if (tripId != null) scheduleAutoSync(tripId)
         }
 
         resetRecordingState()

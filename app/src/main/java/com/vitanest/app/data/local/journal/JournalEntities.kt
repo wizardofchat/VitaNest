@@ -76,7 +76,11 @@ data class VoiceNoteEntity(
     val transcribedAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
-    val synced: Boolean = false
+    val synced: Boolean = false,       // metadata synced via /trip/sync
+    val audioSynced: Boolean = false   // NEW — audio file uploaded via /trip/media.
+    // Separate from `synced`: metadata row must
+    // exist server-side before audio upload is
+    // attempted (contract ordering constraint).
 )
 
 /**

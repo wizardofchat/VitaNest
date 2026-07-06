@@ -1355,6 +1355,16 @@ interface VitaClawApiService {
         @Part file: okhttp3.MultipartBody.Part
     ): Response<TripMediaResponse>
 
+    // ── Trip Synthesis ─────────────────────────────────────────
+    // Day-scoped only (always pass date) — full-trip mode untested from
+    // VitaNest, don't call without date until that's separately verified.
+
+    @POST("chat/offline/travel-synthesis")
+    suspend fun requestTravelSynthesis(@Body request: TravelSynthesisRequest): Response<TravelSynthesisQueuedResponse>
+
+    @GET("chat/offline/job/{jobId}")
+    suspend fun getSynthesisJob(@Path("jobId") jobId: String): Response<TravelSynthesisJobResponse>
+
 }
 
 // ── Trade feedback response ───────────────────────────────────
@@ -1580,4 +1590,34 @@ data class TripMediaResponse(
     val status: String,
     @SerialName("file_path") val filePath: String? = null,
     val error: String? = null
+)
+
+// ── Trip Synthesis ────────────────────────────────────────────
+// Day-scoped only for now — full-trip mode (omit `date`) is accepted by
+// VitaClaw but NOT verified end-to-end from VitaNest; don't build a
+// full-trip UI path against it until separately tested.
+
+@Serializable
+data class TravelSynthesisRequest(
+    @SerialName("trip_id") val tripId: String,
+    val date: String,
+    val source: String = "vitanest"
+)
+
+@Serializable
+data class TravelSynthesisQueuedResponse(
+    @SerialName("job_id") val jobId: String,
+    val status: String
+)
+
+@Serializable
+data class TravelSynthesisJobResponse(
+    @SerialName("job_id") val jobId: String,
+    val message: String? = null,
+    val response: String? = null,
+    val provenance: String? = null,
+    @SerialName("elapsed_ms") val elapsedMs: Long? = null,
+    @SerialName("completed_at") val completedAt: String? = null,
+    val status: String, // "pending" | "done" | "error"
+    @SerialName("file_path") val filePath: String? = null
 )

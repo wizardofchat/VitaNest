@@ -108,6 +108,15 @@ interface VoiceNoteDao {
 
     @Query("UPDATE voice_notes SET synced = 1 WHERE noteId = :noteId")
     suspend fun markSynced(noteId: String)
+
+    // Metadata already synced (synced=1), audio not yet uploaded — ordering
+    // constraint from /trip/sync + /trip/media contract: metadata row must
+    // exist server-side before audio upload is attempted.
+    @Query("SELECT * FROM voice_notes WHERE tripId = :tripId AND synced = 1 AND audioSynced = 0")
+    suspend fun getAudioPendingForTrip(tripId: String): List<VoiceNoteEntity>
+
+    @Query("UPDATE voice_notes SET audioSynced = 1 WHERE noteId = :noteId")
+    suspend fun markAudioSynced(noteId: String)
 }
 
 @Dao

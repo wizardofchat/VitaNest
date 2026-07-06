@@ -36,7 +36,9 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Photo
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Stop
+import com.vitanest.app.data.local.journal.JournalExporter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -81,6 +83,15 @@ fun TripDetailScreen(
     val tripVoiceNotes by viewModel.observeVoiceNotesForTrip(tripId).collectAsState(initial = emptyList())
     val dayNotes by viewModel.observeDayNotesForTrip(tripId).collectAsState(initial = emptyList())
     val photos by viewModel.observePhotosForTrip(tripId).collectAsState(initial = emptyList())
+
+    // Passive sync status — derived from already-collected Flows, no new
+    // DAO query needed. Voice notes count as unsynced if metadata OR audio
+    // hasn't synced, since either half being pending means the trip isn't
+    // fully backed up yet.
+    val unsyncedCount = notes.count { !it.synced } +
+            dayNotes.count { !it.synced } +
+            photos.count { !it.synced } +
+            tripVoiceNotes.count { !it.synced || !it.audioSynced }
 
     var showStopDialog by remember { mutableStateOf(false) }
     var editingNote by remember { mutableStateOf<TripNoteEntity?>(null) }
@@ -268,6 +279,22 @@ fun TripDetailScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                if (unsyncedCount > 0) {
+                    Text(
+                        text = "$unsyncedCount item${if (unsyncedCount == 1) "" else "s"} not yet synced",
+                        fontSize = 11.sp,
+                        color = T.Muted
+                    )
+                } else {
+                    Text(
+                        text = "All synced",
+                        fontSize = 11.sp,
+                        color = T.Muted
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 OutlinedButton(
                     onClick = { viewModel.syncNow(tripId) },
                     enabled = !vmUiState.isSyncing,
@@ -343,7 +370,8 @@ fun TripDetailScreen(
                                     isPlaying     = linkedVoiceNote != null && playingNoteId == linkedVoiceNote.noteId,
                                     onTogglePlay  = { linkedVoiceNote?.let { if (playingNoteId == it.noteId) stopNote() else playNote(it) } },
                                     onEdit        = { editingDayNote = dn; dayNoteTargetDate = dn.date; showDayNoteDialog = true },
-                                    onDelete      = { viewModel.deleteDayNote(dn.entryId) }
+                                    onDelete      = { viewModel.deleteDayNote(dn.entryId) },
+                                    onGenerateSynthesis = { viewModel.requestDaySynthesis(tripId, dn.date) }
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
@@ -410,6 +438,63 @@ fun TripDetailScreen(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 }) { Text("Gallery") }
+            }
+        )
+    }
+
+    if (vmUiState.isSynthesizing) {
+        AlertDialog(
+            onDismissRequest = { /* not dismissible mid-generation — polling continues regardless */ },
+            title = { Text("Generating trip story") },
+            text = {
+                Column {
+                    Text("This can take about a minute.", fontSize = 13.sp, color = T.Muted)
+                    if (vmUiState.synthesisJobId != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Job: ${vmUiState.synthesisJobId}", fontSize = 11.sp, color = T.Muted)
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    if (vmUiState.synthesisError != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearSynthesisResult() },
+            title = { Text("Couldn't generate story") },
+            text = { Text(vmUiState.synthesisError ?: "", fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearSynthesisResult() }) { Text("OK") }
+            }
+        )
+    }
+
+    val storyTrip = trip
+    if (vmUiState.synthesisResult != null && storyTrip != null) {
+        val storyText = vmUiState.synthesisResult ?: ""
+        AlertDialog(
+            onDismissRequest = { viewModel.clearSynthesisResult() },
+            title = { Text("Your trip story") },
+            text = {
+                Text(
+                    text = storyText,
+                    fontSize = 13.sp,
+                    color = T.Ink,
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val uri = JournalExporter.exportSynthesisText(context, storyTrip.name, storyTrip.startDate, storyText)
+                    if (uri != null) JournalExporter.shareSynthesisText(context, uri)
+                }) { Text("Share") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    JournalExporter.exportSynthesisText(context, storyTrip.name, storyTrip.startDate, storyText)
+                    viewModel.clearSynthesisResult()
+                }) { Text("Download") }
             }
         )
     }
@@ -761,7 +846,8 @@ private fun DayNoteRow(
     isPlaying: Boolean,
     onTogglePlay: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onGenerateSynthesis: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -810,6 +896,15 @@ private fun DayNoteRow(
                 val secs = voiceNote.durationSeconds ?: 0
                 Text(text = "${secs / 60}:${(secs % 60).toString().padStart(2, '0')} memo", fontSize = 12.sp, color = T.Ink)
             }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.clickable { onGenerateSynthesis() },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Filled.Star, contentDescription = null, tint = T.Ink, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Trip story", fontSize = 12.sp, color = T.Ink)
         }
     }
 }

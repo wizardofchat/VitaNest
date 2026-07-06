@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [TripEntity::class, TripNoteEntity::class, VoiceNoteEntity::class,
         DayNoteEntity::class, TripPhotoEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class JournalDatabase : RoomDatabase() {
@@ -33,12 +33,13 @@ abstract class JournalDatabase : RoomDatabase() {
                     JournalDatabase::class.java,
                     "vitanest_journal.db"
                 )
-                    // v4 -> v5: added latitude/longitude/notes to trip_photos,
-                    // added mood to day_notes. Destructive fallback used again
-                    // by explicit decision — still test data, no Norway trip
-                    // started. This is the last schema change allowed on
-                    // destructive migration: real Migration is owed before
-                    // any live Norway trip data exists in these tables.
+                    // v5 -> v6: added audioSynced to voice_notes (separate from
+                    // `synced`, which tracks metadata only — audio upload is a
+                    // distinct step). Destructive fallback again — still test
+                    // data. NOTE: v4->v5's comment already said that bump was
+                    // "the last one" before a real Migration. That line was
+                    // wrong. Stop deferring: write the real Migration before
+                    // the next schema change, not after.
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }
             }

@@ -63,12 +63,14 @@ interface JournalRepository {
     suspend fun getUnsyncedStopsForTrip(tripId: String): List<TripNoteEntity>
     suspend fun getUnsyncedDayNotesForTrip(tripId: String): List<DayNoteEntity>
     suspend fun getUnsyncedVoiceNotesForTrip(tripId: String): List<VoiceNoteEntity>
+    suspend fun getAudioPendingForTrip(tripId: String): List<VoiceNoteEntity>
     suspend fun getUnsyncedPhotosForTrip(tripId: String): List<TripPhotoEntity>
 
     suspend fun markTripSynced(tripId: String)
     suspend fun markStopSynced(entryId: String)
     suspend fun markDayNoteSynced(entryId: String)
     suspend fun markVoiceNoteSynced(noteId: String)
+    suspend fun markAudioSynced(noteId: String)
     suspend fun markPhotoSynced(id: String)
 }
 
@@ -133,11 +135,13 @@ class LocalJournalRepository(private val db: JournalDatabase) : JournalRepositor
     override suspend fun getUnsyncedStopsForTrip(tripId: String) = tripNoteDao.getUnsyncedNotesForTrip(tripId)
     override suspend fun getUnsyncedDayNotesForTrip(tripId: String) = dayNoteDao.getUnsyncedNotesForTrip(tripId)
     override suspend fun getUnsyncedVoiceNotesForTrip(tripId: String) = voiceNoteDao.getUnsyncedVoiceNotesForTrip(tripId)
+    override suspend fun getAudioPendingForTrip(tripId: String) = voiceNoteDao.getAudioPendingForTrip(tripId)
     override suspend fun getUnsyncedPhotosForTrip(tripId: String) = tripPhotoDao.getUnsyncedPhotosForTrip(tripId)
 
     override suspend fun markTripSynced(tripId: String) = tripDao.markSynced(tripId)
     override suspend fun markStopSynced(entryId: String) = tripNoteDao.markSynced(entryId)
     override suspend fun markDayNoteSynced(entryId: String) = dayNoteDao.markSynced(entryId)
     override suspend fun markVoiceNoteSynced(noteId: String) = voiceNoteDao.markSynced(noteId)
+    override suspend fun markAudioSynced(noteId: String) = voiceNoteDao.markAudioSynced(noteId)
     override suspend fun markPhotoSynced(id: String) = tripPhotoDao.markSynced(id)
 }

@@ -60,6 +60,48 @@ object JournalExporter {
         context.startActivity(Intent.createChooser(intent, "Share trip export"))
     }
 
+    /**
+     * Trip synthesis result — plain text, not JSON. Separate write path
+     * since the content type and MIME differ from the trip backup export.
+     */
+    fun exportSynthesisText(context: Context, tripName: String, date: String, text: String): Uri? {
+        val safeName = tripName.replace(Regex("[^A-Za-z0-9_-]"), "_").ifBlank { "trip" }
+        val fileName = "vitanest_story_${safeName}_${date}.txt"
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = context.contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+                resolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                uri
+            } else {
+                @Suppress("DEPRECATION")
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val file = java.io.File(downloadsDir, fileName)
+                file.writeText(text)
+                Uri.fromFile(file)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun shareSynthesisText(context: Context, uri: Uri) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share trip story"))
+    }
+
     private fun buildFileName(tripName: String): String {
         val safeName = tripName.replace(Regex("[^A-Za-z0-9_-]"), "_").ifBlank { "trip" }
         val timestamp = java.time.LocalDateTime.now()
@@ -136,6 +178,7 @@ object JournalExporter {
         put("durationSeconds", v.durationSeconds)
         put("latitude", v.latitude)
         put("longitude", v.longitude)
+        put("createdAt", v.createdAt)
     }
 
     private fun photoToJson(p: TripPhotoEntity) = JSONObject().apply {

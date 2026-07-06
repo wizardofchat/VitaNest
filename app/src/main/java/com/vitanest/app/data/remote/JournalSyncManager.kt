@@ -135,15 +135,40 @@ class JournalSyncManager(
             }
         }
 
-        // Voice notes: only attempt upload for notes whose metadata sync
-        // already succeeded (synced=true by this point in the run, or a
-        // prior run). getUnsyncedVoiceNotes() here would return notes whose
-        // audio hasn't uploaded — but that field doesn't distinguish
-        // "metadata synced, audio not uploaded" from "nothing synced yet".
-        // Flagging: VoiceNoteEntity needs a separate audioSynced flag to
-        // do this correctly. Not built — see note below.
+        // Voice note audio — only attempt for notes whose metadata already
+        // synced (getAudioPendingForTrip enforces synced=1 AND audioSynced=0),
+        // per contract ordering constraint.
+        val pendingAudio = repository.getAudioPendingForTrip(tripId)
+        for (voiceNote in pendingAudio) {
+            if (uploadVoiceNoteAudio(voiceNote)) {
+                repository.markAudioSynced(voiceNote.noteId)
+                syncedCount++
+            }
+        }
 
         return syncedCount
+    }
+
+    private suspend fun uploadVoiceNoteAudio(voiceNote: VoiceNoteEntity): Boolean {
+        val file = File(voiceNote.audioPath)
+        if (!file.exists()) return false
+
+        val filePart = MultipartBody.Part.createFormData(
+            "file", file.name, file.asRequestBody("audio/mp4".toMediaType())
+        )
+
+        val response = api.uploadTripMedia(
+            kind      = "voice_note".toPlainRequestBody(),
+            id        = voiceNote.noteId.toPlainRequestBody(),
+            tripId    = (voiceNote.tripId ?: "").toPlainRequestBody(),
+            latitude  = null,
+            longitude = null,
+            notes     = null,
+            file      = filePart
+        )
+
+        val body = response.body()
+        return response.isSuccessful && body?.status == "ok"
     }
 
     private suspend fun uploadPhoto(photo: TripPhotoEntity): Boolean {
