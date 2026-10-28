@@ -82,13 +82,18 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
-private enum class ChatMode { AUTO, OFFLINE, QUERY, REPORT }
-private enum class BuddieSubTab { CHAT, TRADE, OBSERVATIONS }
+private enum class ChatMode { AUTO, OFFLINE, QUERY }
+private enum class BuddieSubTab { CHAT, TRADE, OBSERVATIONS, REPORTS }
 
 private val BuddyGreen  = Color(0xFF2D6A4F)
 private val AmberDash   = Color(0xFFF59E0B)
 private val QueryBlue   = Color(0xFF1D4ED8)
-private val ReportPurple= Color(0xFF7C3AED)
+// Was a bright purple accent distinguishing "Report mode" inside the
+// chat dropdown — no longer needed now Reports has its own tab. Kept
+// as an alias (not deleted) so the ~18 existing call sites across
+// OrderPnlParamsBody/HealthReportParamsBody/ReportCard don't all need
+// individual edits; it now just resolves to the app's own ink color.
+private val ReportPurple = T.Ink
 private val ErrorRed    = Color(0xFFC0392B)
 private val ConfGreen   = Color(0xFF3B6D11)
 private val ConfAmber   = Color(0xFFBA7517)
@@ -372,6 +377,12 @@ fun BuddieScreen(
                         showDot  = unratedObservations > 0,
                         onClick  = { selectedSubTab = BuddieSubTab.OBSERVATIONS }
                     )
+                    SubTabChip(
+                        label    = "Reports",
+                        selected = selectedSubTab == BuddieSubTab.REPORTS,
+                        showDot  = false,
+                        onClick  = { selectedSubTab = BuddieSubTab.REPORTS }
+                    )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
             }
@@ -390,6 +401,10 @@ fun BuddieScreen(
                     )
                     BuddieSubTab.OBSERVATIONS  -> ObservationsTabContent(
                         viewModel = observationsViewModel
+                    )
+                    BuddieSubTab.REPORTS       -> ReportsTabContent(
+                        viewModel  = viewModel,
+                        repository = repository
                     )
                 }
             }
@@ -465,7 +480,7 @@ private fun PlaceholderTabContent(label: String) {
 // a new entry here + a new *FormState subtype + a new *ParamsBody
 // composable (see below) — never a new screen or new job-polling logic
 // (that's all generic — see OfflineInbox / OfflineJobRow further down).
-private enum class ReportKind { ORDER_PNL, HEALTH_REPORT }
+private enum class ReportKind { ORDER_PNL, HEALTH_REPORT, TICKER_FULL_PICTURE, ORDER_LEVEL }
 
 private data class ReportDefinition(
     val kind: ReportKind,
@@ -484,6 +499,16 @@ private val REPORT_DEFINITIONS = listOf(
         kind        = ReportKind.HEALTH_REPORT,
         title       = "Health Report",
         description = "Whoop recovery, sleep & strain summary"
+    ),
+    ReportDefinition(
+        kind        = ReportKind.TICKER_FULL_PICTURE,
+        title       = "Ticker Full Picture",
+        description = "Every holding — yields, dividends, PnL. ~10s."
+    ),
+    ReportDefinition(
+        kind        = ReportKind.ORDER_LEVEL,
+        title       = "Order-Level Report",
+        description = "Every order ever placed, full history. ~12s."
     )
 )
 
@@ -513,6 +538,9 @@ private sealed class ReportFormState {
             }
         }
     }
+
+    // Ticker Full Picture + Order-Level take no parameters — dispatched
+    // directly by ReportKind in ReportsTabContent, no formState needed.
 }
 
 @Composable
@@ -533,15 +561,6 @@ private fun ChatTabContent(
     var quotaExpanded by remember { mutableStateOf(false) }
     var inboxExpanded by remember { mutableStateOf(false) }
     var isSending     by remember { mutableStateOf(false) }
-
-    // ── Report mode state ──────────────────────────────────────
-    // formState holds whichever report's own params are active — swaps
-    // to the matching default whenever a different report is picked from
-    // the dropdown (see the dropdown's onClick handlers further below).
-    var selectedReport by remember { mutableStateOf(REPORT_DEFINITIONS.first()) }
-    var formState: ReportFormState by remember {
-        mutableStateOf(ReportFormState.OrderPnl())
-    }
 
     LaunchedEffect(state.bubbles.size) {
         if (state.bubbles.isNotEmpty()) {
@@ -716,84 +735,71 @@ private fun ChatTabContent(
                 .padding(horizontal = T.screenPadding, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            if (chatMode == ChatMode.REPORT) {
-                ReportParamsPanel(
-                    report             = selectedReport,
-                    formState          = formState,
-                    onFormStateChange  = { formState = it },
-                    isSubmitting       = state.isSubmittingReport,
-                    submitError        = state.reportSubmitError,
-                    onDismissError     = { viewModel.clearReportSubmitError() }
-                )
-            } else {
-                OutlinedTextField(
-                    value         = inputText,
-                    onValueChange = { inputText = it },
-                    placeholder   = {
-                        Text(
-                            text      = if (state.quotaExceeded) "Quota exceeded"
-                            else when (chatMode) {
-                                ChatMode.OFFLINE -> "Offline prompt…"
-                                ChatMode.QUERY   -> "Ask about your finance data…"
-                                else             -> "Ask Buddy…"
-                            },
-                            style     = T.meta,
-                            fontStyle = FontStyle.Italic
-                        )
+            OutlinedTextField(
+                value         = inputText,
+                onValueChange = { inputText = it },
+                placeholder   = {
+                    Text(
+                        text      = if (state.quotaExceeded) "Quota exceeded"
+                        else when (chatMode) {
+                            ChatMode.OFFLINE -> "Offline prompt…"
+                            ChatMode.QUERY   -> "Ask about your finance data…"
+                            else             -> "Ask Buddy…"
+                        },
+                        style     = T.meta,
+                        fontStyle = FontStyle.Italic
+                    )
+                },
+                enabled         = (chatMode == ChatMode.QUERY || !state.quotaExceeded) && !isSending,
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { sendMessage() }),
+                colors          = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = when (chatMode) {
+                        ChatMode.OFFLINE -> AmberDash
+                        ChatMode.QUERY   -> QueryBlue
+                        else             -> T.Ink
                     },
-                    enabled         = (chatMode == ChatMode.QUERY || !state.quotaExceeded) && !isSending,
-                    singleLine      = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { sendMessage() }),
-                    colors          = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = when (chatMode) {
-                            ChatMode.OFFLINE -> AmberDash
-                            ChatMode.QUERY   -> QueryBlue
-                            else             -> T.Ink
-                        },
-                        unfocusedBorderColor = when (chatMode) {
-                            ChatMode.OFFLINE -> AmberDash.copy(alpha = 0.5f)
-                            ChatMode.QUERY   -> QueryBlue.copy(alpha = 0.5f)
-                            else             -> T.Rule
-                        },
-                        focusedTextColor     = T.Ink,
-                        unfocusedTextColor   = T.Ink,
-                        cursorColor          = T.Ink,
-                        disabledBorderColor  = T.Rule,
-                        disabledTextColor    = T.Muted
-                    ),
-                    textStyle = T.meta,
-                    modifier  = Modifier.fillMaxWidth()
-                )
-            }
+                    unfocusedBorderColor = when (chatMode) {
+                        ChatMode.OFFLINE -> AmberDash.copy(alpha = 0.5f)
+                        ChatMode.QUERY   -> QueryBlue.copy(alpha = 0.5f)
+                        else             -> T.Rule
+                    },
+                    focusedTextColor     = T.Ink,
+                    unfocusedTextColor   = T.Ink,
+                    cursorColor          = T.Ink,
+                    disabledBorderColor  = T.Rule,
+                    disabledTextColor    = T.Muted
+                ),
+                textStyle = T.meta,
+                modifier  = Modifier.fillMaxWidth()
+            )
 
             Row(
                 modifier              = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                if (chatMode != ChatMode.REPORT) {
-                    // File upload
-                    OutlinedButton(
-                        onClick        = { filePicker.launch(arrayOf("text/plain", "text/*")) },
-                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                        shape          = RoundedCornerShape(4.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        modifier       = Modifier.height(36.dp)
-                    ) {
-                        Text(text = "File", fontSize = 11.sp, color = T.Muted)
-                    }
+                // File upload
+                OutlinedButton(
+                    onClick        = { filePicker.launch(arrayOf("text/plain", "text/*")) },
+                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier       = Modifier.height(36.dp)
+                ) {
+                    Text(text = "File", fontSize = 11.sp, color = T.Muted)
+                }
 
-                    // Clear chat
-                    OutlinedButton(
-                        onClick        = { viewModel.clearChat() },
-                        border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
-                        shape          = RoundedCornerShape(4.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        modifier       = Modifier.height(36.dp)
-                    ) {
-                        Text(text = "Clear", fontSize = 11.sp, color = T.Muted)
-                    }
+                // Clear chat
+                OutlinedButton(
+                    onClick        = { viewModel.clearChat() },
+                    border         = ButtonDefaults.outlinedButtonBorder.copy(width = 0.5.dp),
+                    shape          = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier       = Modifier.height(36.dp)
+                ) {
+                    Text(text = "Clear", fontSize = 11.sp, color = T.Muted)
                 }
 
                 // Mode dropdown
@@ -809,14 +815,12 @@ private fun ChatTabContent(
                             text     = when (chatMode) {
                                 ChatMode.OFFLINE -> "Offline"
                                 ChatMode.QUERY   -> "NLP Query"
-                                ChatMode.REPORT  -> selectedReport.title
                                 else             -> "Auto"
                             },
                             fontSize = 11.sp,
                             color    = when (chatMode) {
                                 ChatMode.OFFLINE -> AmberDash
                                 ChatMode.QUERY   -> QueryBlue
-                                ChatMode.REPORT  -> ReportPurple
                                 else             -> T.Ink
                             }
                         )
@@ -839,24 +843,6 @@ private fun ChatTabContent(
                             text    = { Text("NLP Query — finance data", style = T.meta) },
                             onClick = { chatMode = ChatMode.QUERY; modeExpanded = false }
                         )
-                        REPORT_DEFINITIONS.forEach { def ->
-                            DropdownMenuItem(
-                                text    = { Text("Report — ${def.title}", style = T.meta) },
-                                onClick = {
-                                    selectedReport = def
-                                    formState = when (def.kind) {
-                                        ReportKind.ORDER_PNL      -> ReportFormState.OrderPnl()
-                                        ReportKind.HEALTH_REPORT  -> ReportFormState.HealthReport.defaultCurrentMonth()
-                                    }
-                                    chatMode = ChatMode.REPORT
-                                    modeExpanded = false
-                                    // Reclaim vertical space — the report
-                                    // panel competes with chat for room, so
-                                    // collapse the inbox if it was open.
-                                    inboxExpanded = false
-                                }
-                            )
-                        }
                         DropdownMenuItem(
                             enabled = false,
                             text    = { Text("Council — coming soon", style = T.meta, color = T.Muted) },
@@ -865,38 +851,15 @@ private fun ChatTabContent(
                     }
                 }
 
-                // Send / Queue / Generate
+                // Send / Queue
                 Button(
-                    onClick        = {
-                        if (chatMode == ChatMode.REPORT) {
-                            when (val fs = formState) {
-                                is ReportFormState.OrderPnl -> viewModel.submitReport(
-                                    tickers = fs.selectedTickers.toList(),
-                                    top5    = fs.top5
-                                )
-                                is ReportFormState.HealthReport -> viewModel.submitHealthReport(
-                                    dateFrom    = fs.dateFrom,
-                                    dateTo      = fs.dateTo,
-                                    detailDates = fs.detailDates.ifEmpty { null }
-                                )
-                            }
-                        } else {
-                            sendMessage()
-                        }
-                    },
-                    enabled        = if (chatMode == ChatMode.REPORT) {
-                        !state.isSubmittingReport && when (val fs = formState) {
-                            is ReportFormState.OrderPnl     -> fs.selectedTickers.isNotEmpty()
-                            is ReportFormState.HealthReport -> !viewModel.hasHealthReportInFlight()
-                        }
-                    } else
-                        inputText.trim().isNotEmpty() && !isSending &&
-                                (chatMode == ChatMode.QUERY || !state.quotaExceeded),
+                    onClick        = { sendMessage() },
+                    enabled        = inputText.trim().isNotEmpty() && !isSending &&
+                            (chatMode == ChatMode.QUERY || !state.quotaExceeded),
                     colors         = ButtonDefaults.buttonColors(
                         containerColor         = when (chatMode) {
                             ChatMode.OFFLINE -> AmberDash
                             ChatMode.QUERY   -> QueryBlue
-                            ChatMode.REPORT  -> ReportPurple
                             else             -> T.Ink
                         },
                         contentColor           = T.Paper,
@@ -910,7 +873,6 @@ private fun ChatTabContent(
                     Text(
                         text       = when (chatMode) {
                             ChatMode.OFFLINE -> "Queue"
-                            ChatMode.REPORT  -> if (state.isSubmittingReport) "..." else "Generate"
                             else             -> "Send"
                         },
                         fontSize   = 12.sp,
@@ -922,110 +884,187 @@ private fun ChatTabContent(
     }
 }
 
-// ── Report params panel ──────────────────────────────────────────
-// Renders in place of the free-text input when chatMode == REPORT.
-// This composable owns only the shared shell (title row, collapse
-// toggle, submit error, submitting spinner) — the actual fields differ
-// per report and live in OrderPnlParamsBody / HealthReportParamsBody
-// below. Adding report #3 means a new *ParamsBody + one more branch in
-// the dispatch below, not a change to this shell.
+// ── Reports tab ───────────────────────────────────────────────────
+// Promoted out of the Chat-mode dropdown (2026-09-22) — mixing "which
+// LLM tier" (Auto/Offline/NLP Query) with "which report to run" in one
+// list stopped scaling past two reports. Each card below is self-
+// contained: title + description from ReportDefinition, expandable
+// params for the two reports that take them, a bare Generate button
+// for the two that don't. Job status/download reuses OfflineInbox
+// unchanged, filtered to just report-type jobs so Dolphin chat jobs
+// don't bleed in here.
 @Composable
-private fun ReportParamsPanel(
-    report: ReportDefinition,
-    formState: ReportFormState,
-    onFormStateChange: (ReportFormState) -> Unit,
-    isSubmitting: Boolean,
-    submitError: String?,
-    onDismissError: () -> Unit
+private fun ReportsTabContent(
+    viewModel:  BuddieViewModel,
+    repository: VitaClawRepository
 ) {
-    var collapsed by remember(report.kind) { mutableStateOf(false) }
+    val state   by viewModel.state.collectAsState()
+    val scope   = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    var inboxExpanded by remember { mutableStateOf(false) }
+    var orderPnlState by remember { mutableStateOf(ReportFormState.OrderPnl()) }
+    var healthState    by remember { mutableStateOf(ReportFormState.HealthReport.defaultCurrentMonth()) }
+
+    val reportTitles = REPORT_DEFINITIONS.map { it.title }.toSet()
+    val reportJobs = state.offlineJobs.filter { it.message in reportTitles }
 
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .border(0.5.dp, ReportPurple.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-            .animateContentSize()
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = T.screenPadding, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Row(
-            modifier              = Modifier
-                .fillMaxWidth()
-                .clickable { collapsed = !collapsed },
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            Text(text = report.title, style = T.sectionHead, color = ReportPurple)
-            Text(
-                text     = if (collapsed) "${collapsedSummary(formState)}  ▾" else "▴",
-                fontSize = 10.sp,
-                color    = T.Muted
-            )
-        }
-
-        if (collapsed) return@Column
-
-        if (submitError != null) {
+        if (state.reportSubmitError != null) {
             Row(
                 modifier              = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                Text(text = submitError, style = T.meta, color = ErrorRed)
-                TextButton(onClick = onDismissError, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Text(text = state.reportSubmitError ?: "", style = T.meta, color = ErrorRed)
+                TextButton(onClick = { viewModel.clearReportSubmitError() }, contentPadding = PaddingValues(horizontal = 4.dp)) {
                     Text(text = "Dismiss", fontSize = 10.sp, color = T.Muted)
                 }
             }
         }
 
-        Column(
-            modifier            = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 260.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            when (formState) {
-                is ReportFormState.OrderPnl -> OrderPnlParamsBody(
-                    state    = formState,
-                    onChange = onFormStateChange
-                )
-                is ReportFormState.HealthReport -> HealthReportParamsBody(
-                    state    = formState,
-                    onChange = onFormStateChange
-                )
-            }
+        REPORT_DEFINITIONS.forEach { def ->
+            ReportCard(
+                definition   = def,
+                isSubmitting = state.isSubmittingReport,
+                content      = {
+                    when (def.kind) {
+                        ReportKind.ORDER_PNL -> {
+                            OrderPnlParamsBody(state = orderPnlState, onChange = { orderPnlState = it })
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick  = {
+                                    viewModel.submitReport(
+                                        tickers = orderPnlState.selectedTickers.toList(),
+                                        top5    = orderPnlState.top5
+                                    )
+                                },
+                                enabled  = !state.isSubmittingReport && orderPnlState.selectedTickers.isNotEmpty(),
+                                colors   = ButtonDefaults.buttonColors(
+                                    containerColor         = ReportPurple,
+                                    contentColor            = T.Paper,
+                                    disabledContainerColor = T.Rule,
+                                    disabledContentColor   = T.Muted
+                                ),
+                                shape    = RoundedCornerShape(4.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (state.isSubmittingReport) "…" else "Generate", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        ReportKind.HEALTH_REPORT -> {
+                            HealthReportParamsBody(state = healthState, onChange = { healthState = it })
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick  = {
+                                    viewModel.submitHealthReport(
+                                        dateFrom    = healthState.dateFrom,
+                                        dateTo      = healthState.dateTo,
+                                        detailDates = healthState.detailDates.ifEmpty { null }
+                                    )
+                                },
+                                enabled  = !viewModel.hasHealthReportInFlight(),
+                                colors   = ButtonDefaults.buttonColors(
+                                    containerColor         = ReportPurple,
+                                    contentColor            = T.Paper,
+                                    disabledContainerColor = T.Rule,
+                                    disabledContentColor   = T.Muted
+                                ),
+                                shape    = RoundedCornerShape(4.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (viewModel.hasHealthReportInFlight()) "…" else "Generate", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        ReportKind.TICKER_FULL_PICTURE -> {
+                            Button(
+                                onClick  = { viewModel.submitTickerReport() },
+                                enabled  = !viewModel.hasTickerReportInFlight(),
+                                colors   = ButtonDefaults.buttonColors(
+                                    containerColor         = ReportPurple,
+                                    contentColor            = T.Paper,
+                                    disabledContainerColor = T.Rule,
+                                    disabledContentColor   = T.Muted
+                                ),
+                                shape    = RoundedCornerShape(4.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (viewModel.hasTickerReportInFlight()) "…" else "Generate", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        ReportKind.ORDER_LEVEL -> {
+                            Button(
+                                onClick  = { viewModel.submitOrderLevelReport() },
+                                enabled  = !viewModel.hasOrderLevelReportInFlight(),
+                                colors   = ButtonDefaults.buttonColors(
+                                    containerColor         = ReportPurple,
+                                    contentColor            = T.Paper,
+                                    disabledContainerColor = T.Rule,
+                                    disabledContentColor   = T.Muted
+                                ),
+                                shape    = RoundedCornerShape(4.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (viewModel.hasOrderLevelReportInFlight()) "…" else "Generate", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            )
         }
 
-        if (isSubmitting) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                CircularProgressIndicator(
-                    color       = ReportPurple,
-                    strokeWidth = 1.5.dp,
-                    modifier    = Modifier.size(14.dp)
-                )
-                Text(text = "Submitting…", style = T.meta, color = T.Muted)
-            }
-        }
+        OfflineInbox(
+            jobs       = reportJobs,
+            expanded   = inboxExpanded,
+            onToggle   = { inboxExpanded = !inboxExpanded },
+            onDownload = { job ->
+                if (job.hasFile) {
+                    downloadJobFile(context, scope, repository, job)
+                } else {
+                    downloadJobAsText(context, job)
+                    viewModel.ackOfflineJob(job.jobId)
+                }
+            },
+            onShare    = { job ->
+                if (job.hasFile) {
+                    shareJobFile(context, scope, repository, job)
+                    viewModel.ackOfflineJob(job.jobId)
+                }
+            },
+            onDismiss  = { job -> viewModel.ackOfflineJob(job.jobId) },
+            onClearAll = { viewModel.clearAllOfflineJobs() }
+        )
+
+        Spacer(modifier = Modifier.height(80.dp)) // clear the bottom nav
     }
 }
 
-// One-line summary shown when the panel is collapsed.
-private fun collapsedSummary(formState: ReportFormState): String = when (formState) {
-    is ReportFormState.OrderPnl -> {
-        val n = formState.selectedTickers.size
-        "$n ticker${if (n == 1) "" else "s"} · ${if (formState.top5) "Top 5" else "Full"}"
-    }
-    is ReportFormState.HealthReport -> {
-        val range = if (formState.dateFrom != null || formState.dateTo != null)
-            "${formState.dateFrom ?: "…"} → ${formState.dateTo ?: "…"}"
-        else "Full history"
-        range
+@Composable
+private fun ReportCard(
+    definition: ReportDefinition,
+    isSubmitting: Boolean,
+    content: @Composable () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.5.dp, T.Rule, RoundedCornerShape(10.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(text = definition.title, style = T.sectionHead, color = T.Ink)
+        Text(text = definition.description, style = T.meta, color = T.Muted)
+        Spacer(modifier = Modifier.height(6.dp))
+        content()
     }
 }
+
 
 // ── Order PnL params body ────────────────────────────────────────
 @Composable
@@ -3088,37 +3127,43 @@ private fun readTextFile(context: Context, uri: Uri): String {
 // <external-path name="downloads" path="Download/" /> entry — added
 // 2026-06-27, FileProvider throws IllegalArgumentException without it.
 
-private fun isHealthReportJob(job: PendingOfflineItem): Boolean =
-    job.message.startsWith("Health Report") ||
-            job.response.contains("Health report", ignoreCase = true)
+// Maps a real Content-Type header to a file extension. Falls back to
+// .bin for anything unrecognized rather than silently mislabeling it —
+// an unrecognized-but-honest extension is safer than a wrong-but-known
+// one (the bug this replaced).
+private fun extensionForMimeType(mimeType: String): String = when {
+    mimeType.contains("pdf")                        -> "pdf"
+    mimeType.contains("spreadsheetml") ||
+            mimeType.contains("ms-excel")                 -> "xlsx"
+    mimeType.contains("wordprocessingml") ||
+            mimeType == "application/msword"               -> "docx"
+    mimeType.contains("csv")                          -> "csv"
+    mimeType.contains("json")                         -> "json"
+    mimeType.contains("zip")                          -> "zip"
+    else                                                 -> "bin"
+}
 
-private fun reportFileExtension(job: PendingOfflineItem): String =
-    if (isHealthReportJob(job)) "pdf" else "xlsx"
-
-private fun reportMimeType(job: PendingOfflineItem): String =
-    if (isHealthReportJob(job)) "application/pdf"
-    else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-private fun reportFileName(job: PendingOfflineItem): String {
+private fun reportFileName(job: PendingOfflineItem, mimeType: String): String {
     // No file_path string is returned by /chat/offline/pending (confirmed
     // 2026-06-25 — only has_file: Boolean is present). Name from job_id
     // instead; the actual bytes come from GET .../job/{job_id}/file
     // regardless of what we call the saved local copy.
-    return "vitaclaw_report_${job.jobId}.${reportFileExtension(job)}"
+    return "vitaclaw_report_${job.jobId}.${extensionForMimeType(mimeType)}"
 }
 
 private suspend fun saveReportFileToDownloads(
     context: Context,
     repository: VitaClawRepository,
     job: PendingOfflineItem
-): Uri? {
-    val bytesResult = repository.downloadOfflineJobFile(job.jobId)
-    val bytes = bytesResult.getOrNull() ?: return null
+): Pair<Uri, String>? {
+    val fileResult = repository.downloadOfflineJobFile(job.jobId)
+    val file = fileResult.getOrNull() ?: return null
+    val bytes = file.bytes
+    val mimeType = file.contentType.substringBefore(";").trim() // strip charset if present
 
-    val fileName = reportFileName(job)
-    val mimeType = reportMimeType(job)
+    val fileName = reportFileName(job, mimeType)
 
-    return try {
+    val uri = try {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             // API 29+ — MediaStore.Downloads, scoped storage.
             val contentValues = android.content.ContentValues().apply {
@@ -3151,17 +3196,19 @@ private suspend fun saveReportFileToDownloads(
                 android.os.Environment.DIRECTORY_DOWNLOADS
             )
             if (!downloadsDir.exists()) downloadsDir.mkdirs()
-            val file = java.io.File(downloadsDir, fileName)
-            file.writeBytes(bytes)
+            val outFile = java.io.File(downloadsDir, fileName)
+            outFile.writeBytes(bytes)
 
             androidx.core.content.FileProvider.getUriForFile(
-                context, "${context.packageName}.provider", file
+                context, "${context.packageName}.provider", outFile
             )
         }
     } catch (e: Exception) {
         e.printStackTrace()
         null
-    }
+    } ?: return null
+
+    return uri to mimeType
 }
 
 // "Download" — silent save, no share sheet. Toast confirms success/failure
@@ -3173,8 +3220,8 @@ private fun downloadJobFile(
     job: PendingOfflineItem
 ) {
     scope.launch {
-        val uri = saveReportFileToDownloads(context, repository, job)
-        val message = if (uri != null) "Saved to Downloads — ${reportFileName(job)}"
+        val result = saveReportFileToDownloads(context, repository, job)
+        val message = if (result != null) "Saved to Downloads"
         else "Couldn't save report — try again"
         android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
     }
@@ -3189,15 +3236,16 @@ private fun shareJobFile(
     job: PendingOfflineItem
 ) {
     scope.launch {
-        val uri = saveReportFileToDownloads(context, repository, job)
-        if (uri == null) {
+        val result = saveReportFileToDownloads(context, repository, job)
+        if (result == null) {
             android.widget.Toast.makeText(
                 context, "Couldn't prepare report for sharing — try again", android.widget.Toast.LENGTH_LONG
             ).show()
             return@launch
         }
+        val (uri, mimeType) = result
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = reportMimeType(job)
+            type = mimeType
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, job.message.take(60))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

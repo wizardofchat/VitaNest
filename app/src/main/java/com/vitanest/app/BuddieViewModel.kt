@@ -484,6 +484,109 @@ class BuddieViewModel(
         _state.value = _state.value.copy(reportSubmitError = null)
     }
 
+    // Ticker Full Picture + Order-Level — third/fourth report types, both
+    // zero-parameter full-portfolio scans (no ticker picker, no date
+    // range — unlike order_pnl_report and whoop_health_report). Simple
+    // in-flight guard by message prefix, same idea as
+    // hasHealthReportInFlight(), so a second tap while one's still
+    // generating doesn't queue a duplicate job.
+
+    fun hasTickerReportInFlight(): Boolean =
+        _state.value.offlineJobs.any {
+            isInFlight(it.status) && it.message == "Ticker Full Picture Report"
+        }
+
+    fun submitTickerReport() {
+        if (hasTickerReportInFlight()) {
+            _state.value = _state.value.copy(
+                reportSubmitError = "A ticker report is already generating — wait for it to finish"
+            )
+            return
+        }
+        _state.value = _state.value.copy(isSubmittingReport = true, reportSubmitError = null)
+
+        val requestSummary = "Ticker Full Picture Report"
+
+        viewModelScope.launch {
+            repository.submitTickerReport().fold(
+                onSuccess = { resp ->
+                    val newJob = PendingOfflineItem(
+                        jobId   = resp.jobId,
+                        message = requestSummary,
+                        status  = resp.status
+                    )
+                    val userBubble   = BubbleMsg(role = "user", text = requestSummary)
+                    val queuedBubble = BubbleMsg(
+                        role     = "buddy",
+                        text     = "Generating ticker report — job ${resp.jobId}…",
+                        isQueued = true,
+                        jobId    = resp.jobId
+                    )
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        offlineJobs        = _state.value.offlineJobs + newJob,
+                        bubbles            = _state.value.bubbles + userBubble + queuedBubble
+                    )
+                    maybeStartPolling()
+                },
+                onFailure = { err ->
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        reportSubmitError  = err.message ?: "Could not submit report — check Tailscale"
+                    )
+                }
+            )
+        }
+    }
+
+    fun hasOrderLevelReportInFlight(): Boolean =
+        _state.value.offlineJobs.any {
+            isInFlight(it.status) && it.message == "Order-Level Report"
+        }
+
+    fun submitOrderLevelReport() {
+        if (hasOrderLevelReportInFlight()) {
+            _state.value = _state.value.copy(
+                reportSubmitError = "An order-level report is already generating — wait for it to finish"
+            )
+            return
+        }
+        _state.value = _state.value.copy(isSubmittingReport = true, reportSubmitError = null)
+
+        val requestSummary = "Order-Level Report"
+
+        viewModelScope.launch {
+            repository.submitOrderLevelReport().fold(
+                onSuccess = { resp ->
+                    val newJob = PendingOfflineItem(
+                        jobId   = resp.jobId,
+                        message = requestSummary,
+                        status  = resp.status
+                    )
+                    val userBubble   = BubbleMsg(role = "user", text = requestSummary)
+                    val queuedBubble = BubbleMsg(
+                        role     = "buddy",
+                        text     = "Generating order-level report — job ${resp.jobId}…",
+                        isQueued = true,
+                        jobId    = resp.jobId
+                    )
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        offlineJobs        = _state.value.offlineJobs + newJob,
+                        bubbles            = _state.value.bubbles + userBubble + queuedBubble
+                    )
+                    maybeStartPolling()
+                },
+                onFailure = { err ->
+                    _state.value = _state.value.copy(
+                        isSubmittingReport = false,
+                        reportSubmitError  = err.message ?: "Could not submit report — check Tailscale"
+                    )
+                }
+            )
+        }
+    }
+
     // Safety net for the 2026-06-30 stuck-polling bug: if the polling
     // coroutine got suspended/cancelled by an Activity lifecycle event
     // while backgrounded, nothing else calls maybeStartPolling() again

@@ -1146,6 +1146,34 @@ data class BuddieGrowthCandidatesResponse(
 
 // ── Retrofit interface ────────────────────────────────────────
 
+// ── Ticker Full Picture report (third report type) ──────────────────
+// Contract: POST /chat/offline/ticker-report. No params required — full
+// portfolio scan, no filtering. Body may be empty {} or {"source": "..."}.
+@Serializable
+data class TickerReportRequest(
+    val source: String = "vitanest"
+)
+
+// ── Order-Level report (fourth report type) ──────────────────────────
+// Contract: POST /chat/offline/order-level-report. Same shape as
+// TickerReportRequest — no filtering, full order history every time.
+@Serializable
+data class OrderLevelReportRequest(
+    val source: String = "vitanest"
+)
+
+// Holds the raw bytes + actual server-reported Content-Type for a
+// downloaded offline-job file. Introduced 2026-09-22 to replace a
+// client-side job-type heuristic (isHealthReportJob() -> pdf else xlsx)
+// that broke silently for any report type added after it was written —
+// confirmed: Ticker Full Picture / Order-Level Report files were being
+// mislabeled .xlsx regardless of their real format, so WhatsApp/etc.
+// rejected them as invalid. Use the header, never guess from job kind.
+data class DownloadedReportFile(
+    val bytes: ByteArray,
+    val contentType: String
+)
+
 interface VitaClawApiService {
 
     @GET("health")
@@ -1189,6 +1217,23 @@ interface VitaClawApiService {
     @POST("chat/offline/health-report")
     suspend fun submitOfflineHealthReport(
         @Body request: OfflineHealthReportRequest
+    ): Response<OfflineReportSubmitResponse>
+
+    // Ticker Full Picture — every current holding, yields, dividends,
+    // PnL. No params. ~9-10s per VitaClaw confirmation 2026-09-22.
+    @POST("chat/offline/ticker-report")
+    suspend fun submitTickerReport(
+        @Body request: TickerReportRequest = TickerReportRequest()
+    ): Response<OfflineReportSubmitResponse>
+
+    // Order-Level — every order ever placed, full history. No params.
+    // ~12s per VitaClaw confirmation 2026-09-22. Known limitation:
+    // USD/UCITS dual-listed tickers (ARKK, ARKG, ARKI, NDIA confirmed)
+    // may show implausible PnL% due to a symbol-resolution bug in the
+    // shared yfinance pricing layer — backend-owned, not fixable here.
+    @POST("chat/offline/order-level-report")
+    suspend fun submitOrderLevelReport(
+        @Body request: OrderLevelReportRequest = OrderLevelReportRequest()
     ): Response<OfflineReportSubmitResponse>
 
     // Raw bytes — check PendingOfflineItem.hasFile first; a 404 here

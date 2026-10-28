@@ -38,8 +38,11 @@ import com.vitanest.app.data.remote.IncomeStressRequest
 import com.vitanest.app.data.remote.IncomeStressResponse
 import com.vitanest.app.data.remote.IntentsResponse
 import com.vitanest.app.data.remote.ObservationsResponse
+import com.vitanest.app.data.remote.DownloadedReportFile
 import com.vitanest.app.data.remote.OfflineHealthReportRequest
 import com.vitanest.app.data.remote.OfflineReportRequest
+import com.vitanest.app.data.remote.OrderLevelReportRequest
+import com.vitanest.app.data.remote.TickerReportRequest
 import com.vitanest.app.data.remote.OfflineReportSubmitResponse
 import com.vitanest.app.data.remote.OrdersSummaryResponse
 import com.vitanest.app.data.remote.PendingOfflineResponse
@@ -191,7 +194,10 @@ open class VitaClawRepository {
                 val body = r.body()
                 if (body != null) Result.success(body)
                 else Result.failure(Exception("Empty response from /chat/offline/report"))
-            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+            } else {
+                val errorDetail = r.errorBody()?.string() ?: "no error body"
+                Result.failure(Exception("HTTP ${r.code()}: $errorDetail"))
+            }
         } catch (e: Exception) { Result.failure(e) }
     }
 
@@ -223,16 +229,49 @@ open class VitaClawRepository {
         } catch (e: Exception) { Result.failure(e) }
     }
 
-    // Returns raw .xlsx bytes. Caller (UI layer) must confirm
-    // PendingOfflineItem.hasFile is true before calling this — file_path
-    // can be null even at status == "done", and a 404 here means the job
-    // has no associated file or it no longer exists on disk.
-    open suspend fun downloadOfflineJobFile(jobId: String): Result<ByteArray> {
+    // Ticker Full Picture — every current holding, no filtering. ~9-10s.
+    open suspend fun submitTickerReport(): Result<OfflineReportSubmitResponse> {
+        return try {
+            val r = apiService.submitTickerReport(TickerReportRequest())
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /chat/offline/ticker-report"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // Order-Level — every order ever placed, full history, no filtering.
+    // ~12s. Known limitation: USD/UCITS dual-listed tickers (ARKK, ARKG,
+    // ARKI, NDIA confirmed) may show implausible PnL% — backend pricing
+    // bug, not fixable here.
+    open suspend fun submitOrderLevelReport(): Result<OfflineReportSubmitResponse> {
+        return try {
+            val r = apiService.submitOrderLevelReport(OrderLevelReportRequest())
+            if (r.isSuccessful) {
+                val body = r.body()
+                if (body != null) Result.success(body)
+                else Result.failure(Exception("Empty response from /chat/offline/order-level-report"))
+            } else Result.failure(Exception("HTTP ${r.code()}: ${r.message()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // Returns raw file bytes + the server's actual Content-Type header —
+    // callers must not guess format from job type (that was the bug:
+    // isHealthReportJob()-style heuristics silently mislabel any newer
+    // report type, producing a file WhatsApp/etc. reject as invalid).
+    // Caller (UI layer) must confirm PendingOfflineItem.hasFile is true
+    // before calling this — a 404 here means the job has no associated
+    // file or it no longer exists on disk.
+    open suspend fun downloadOfflineJobFile(jobId: String): Result<DownloadedReportFile> {
         return try {
             val r = apiService.downloadOfflineJobFile(jobId)
             if (r.isSuccessful) {
                 val bytes = r.body()?.bytes()
-                if (bytes != null) Result.success(bytes)
+                if (bytes != null) {
+                    val contentType = r.headers()["Content-Type"] ?: "application/octet-stream"
+                    Result.success(DownloadedReportFile(bytes, contentType))
+                }
                 else Result.failure(Exception("Empty file response for job $jobId"))
             } else if (r.code() == 404) {
                 Result.failure(Exception("Report file not found — job may have no file or it was removed"))
