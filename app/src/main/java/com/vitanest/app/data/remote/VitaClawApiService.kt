@@ -114,8 +114,10 @@ data class ChatResponse(
 @Serializable
 data class ChatOpeningResponse(
     val summary: String,
-    @SerialName("recovery_score")  val recoveryScore: Float,
-    @SerialName("recovery_colour") val recoveryColour: String,
+    // Nullable since the health rewire (28 Oct): null on Garmin days.
+    // Non-null without a default made the whole opening fail to parse.
+    @SerialName("recovery_score")  val recoveryScore: Float? = null,
+    @SerialName("recovery_colour") val recoveryColour: String? = null,
     @SerialName("proactive_flags") val proactiveFlags: List<String> = emptyList(),
     val brief: String = "",
     val provenance: String = ""
@@ -533,20 +535,25 @@ data class BriefResponse(
 
 // ── Whoop ─────────────────────────────────────────────────────
 
+// Metric fields are nullable since the health rewire (28 Oct 2026):
+// /whoop is filled from health_daily, and Whoop-only fields (recovery,
+// strain, sleep performance/efficiency, skin temp, disturbances) are
+// null on Garmin days. Before, coerceInputValues turned null into 0f.
+// Screens show "—" for a missing shared metric and hide Whoop-only tiles.
 @Serializable
 data class WhoopResponse(
-    @SerialName("recovery_score")     val recoveryScore: Float = 0f,
-    @SerialName("resting_heart_rate") val restingHeartRate: Float = 0f,
-    @SerialName("hrv_rmssd_milli")    val hrvRmssdMilli: Float = 0f,
-    @SerialName("spo2_percentage")    val spo2Percentage: Float = 0f,
-    @SerialName("skin_temp_celsius")  val skinTempCelsius: Float = 0f,
+    @SerialName("recovery_score")     val recoveryScore: Float? = null,
+    @SerialName("resting_heart_rate") val restingHeartRate: Float? = null,
+    @SerialName("hrv_rmssd_milli")    val hrvRmssdMilli: Float? = null,
+    @SerialName("spo2_percentage")    val spo2Percentage: Float? = null,
+    @SerialName("skin_temp_celsius")  val skinTempCelsius: Float? = null,
     @SerialName("last_updated")       val lastUpdated: String = "",
-    @SerialName("strain")             val strain: Float = 0f,
-    @SerialName("sleep_performance")  val sleepPerformance: Float = 0f,
-    @SerialName("sleep_efficiency")   val sleepEfficiency: Float = 0f,
-    @SerialName("rem_min")            val remMin: Float = 0f,
-    @SerialName("deep_min")           val deepMin: Float = 0f,
-    @SerialName("disturbances")       val disturbances: Int = 0,
+    @SerialName("strain")             val strain: Float? = null,
+    @SerialName("sleep_performance")  val sleepPerformance: Float? = null,
+    @SerialName("sleep_efficiency")   val sleepEfficiency: Float? = null,
+    @SerialName("rem_min")            val remMin: Float? = null,
+    @SerialName("deep_min")           val deepMin: Float? = null,
+    @SerialName("disturbances")       val disturbances: Int? = null,
     @SerialName("last_workout")       val lastWorkout: String = "",
     // ── Analytics fields — null on day-view calls ──────────────
     @SerialName("series")             val series:     WhoopAnalyticsSeries? = null,
@@ -557,6 +564,10 @@ data class WhoopResponse(
     // ── Patterns — null unless patterns=true passed ────────────
     @SerialName("patterns")           val patterns:   WhoopPatterns?        = null
 )
+
+// A reading of 0 or below is treated as missing: covers null from the API
+// and 0 values still sitting in the on-device cache from the old model.
+fun Float?.presentOrNull(): Float? = this?.takeIf { it > 0f }
 
 // ── Whoop analytics (GET /whoop?range=) ──────────────────────
 // Nullable fields — day-view calls (/whoop?date=) return null for these.

@@ -330,8 +330,9 @@ fun BuddieScreen(
                         fontSize   = 22.sp,
                         color      = T.Ink
                     )
-                    state.opening?.let { o ->
-                        val pillColor = when (o.recoveryColour) {
+                    // Recovery pill only when a recovery score exists (Whoop-only)
+                    state.opening?.recoveryScore?.takeIf { it > 0f }?.let { score ->
+                        val pillColor = when (state.opening?.recoveryColour) {
                             "green" -> BuddyGreen
                             "red"   -> ErrorRed
                             else    -> Color(0xFFD4A017)
@@ -342,7 +343,7 @@ fun BuddieScreen(
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text       = "${o.recoveryScore.toInt()}% recovery",
+                                text       = "${score.toInt()}% recovery",
                                 fontSize   = 11.sp,
                                 color      = T.Paper,
                                 fontWeight = FontWeight.Medium
@@ -3280,24 +3281,26 @@ private fun BriefCard(structured: BriefStructured) {
                     else                 -> ErrorRed
                 }
                 Text(
-                    text       = "${recoveryScore.toInt()}% $recoveryStatus",
+                    text       = "${recoveryScore.toInt()}% ${recoveryStatus.orEmpty()}".trim(),
                     fontSize   = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color      = statusColor
                 )
                 recoveryTrend?.let { Text(text = it, style = T.meta, color = T.Muted) }
             }
-            val hrv = structured.hrvMs
-            val rhr = structured.rhrBpm
-            if (hrv != null || rhr != null) {
-                Text(
-                    text  = listOfNotNull(
-                        hrv?.let { "HRV ${"%.0f".format(it)}ms" },
-                        rhr?.let { "RHR ${it.toInt()}bpm" }
-                    ).joinToString("  ·  "),
-                    style = T.meta, color = T.Muted
-                )
-            }
+        }
+        // HRV / RHR line moved out of the recovery block: on Garmin days
+        // recovery is null but HRV and RHR still exist.
+        val hrv = structured.hrvMs?.takeIf { it > 0f }
+        val rhr = structured.rhrBpm?.takeIf { it > 0f }
+        if (hrv != null || rhr != null) {
+            Text(
+                text  = listOfNotNull(
+                    hrv?.let { "HRV ${"%.0f".format(it)}ms" },
+                    rhr?.let { "RHR ${it.toInt()}bpm" }
+                ).joinToString("  ·  "),
+                style = T.meta, color = T.Muted
+            )
         }
         HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
         val portVal = structured.portfolioValueGbp

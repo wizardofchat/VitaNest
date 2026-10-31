@@ -376,23 +376,27 @@ private fun DarkStatStrip(
     activeMetric: HealthMetric,
     onSelect:     (HealthMetric) -> Unit
 ) {
-    val avgSpo2 = series.spo2Points().map     { it.second }.let { if (it.isEmpty()) 0.0 else it.average() }
-    val avgHrv  = series.hrvPoints().map      { it.second }.let { if (it.isEmpty()) 0.0 else it.average() }
-    val avgRhr  = series.rhrPoints().map      { it.second }.let { if (it.isEmpty()) 0.0 else it.average() }
-    val avgRec  = series.recoveryPoints().map { it.second }.let { if (it.isEmpty()) 0.0 else it.average() }
+    // null average = no readings in range → "—" (was drawn as 0)
+    val avgSpo2 = series.spo2Points().map     { it.second }.let { if (it.isEmpty()) null else it.average() }
+    val avgHrv  = series.hrvPoints().map      { it.second }.let { if (it.isEmpty()) null else it.average() }
+    val avgRhr  = series.rhrPoints().map      { it.second }.let { if (it.isEmpty()) null else it.average() }
+    val avgRec  = series.recoveryPoints().map { it.second }.let { if (it.isEmpty()) null else it.average() }
 
     val warnPct   = thresholds?.spo2WarningPct?.toFloat() ?: 92f
-    val spo2Color = if (avgSpo2 < warnPct) AmberChart else GreenChart
-    val recColor  = if (avgRec >= 67) GreenChart else if (avgRec >= 34) AmberChart else RedAlert
+    val spo2Color = if (avgSpo2 != null && avgSpo2 < warnPct) AmberChart else GreenChart
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        DarkStatCard(Modifier.weight(1f), "Avg SpO₂",  "${"%.1f".format(avgSpo2)}%",  spo2Color,  activeMetric == HealthMetric.SPO2)     { onSelect(HealthMetric.SPO2) }
-        DarkStatCard(Modifier.weight(1f), "Avg HRV",   "${"%.0f".format(avgHrv)}ms",  GreenChart, activeMetric == HealthMetric.HRV)      { onSelect(HealthMetric.HRV) }
-        DarkStatCard(Modifier.weight(1f), "Avg RHR",   "${"%.0f".format(avgRhr)}bpm", CoralChart, activeMetric == HealthMetric.RHR)      { onSelect(HealthMetric.RHR) }
-        DarkStatCard(Modifier.weight(1f), "Avg Rec",   "${"%.0f".format(avgRec)}%",   recColor,   activeMetric == HealthMetric.RECOVERY) { onSelect(HealthMetric.RECOVERY) }
+        DarkStatCard(Modifier.weight(1f), "Avg SpO₂",  avgSpo2?.let { "${"%.1f".format(it)}%" }  ?: "—", spo2Color,  activeMetric == HealthMetric.SPO2) { onSelect(HealthMetric.SPO2) }
+        DarkStatCard(Modifier.weight(1f), "Avg HRV",   avgHrv?.let  { "${"%.0f".format(it)}ms" } ?: "—", GreenChart, activeMetric == HealthMetric.HRV)  { onSelect(HealthMetric.HRV) }
+        DarkStatCard(Modifier.weight(1f), "Avg RHR",   avgRhr?.let  { "${"%.0f".format(it)}bpm" } ?: "—", CoralChart, activeMetric == HealthMetric.RHR) { onSelect(HealthMetric.RHR) }
+        // Whoop-only: card hidden when the range has no recovery readings
+        avgRec?.let { rec ->
+            val recColor = if (rec >= 67) GreenChart else if (rec >= 34) AmberChart else RedAlert
+            DarkStatCard(Modifier.weight(1f), "Avg Rec", "${"%.0f".format(rec)}%", recColor, activeMetric == HealthMetric.RECOVERY) { onSelect(HealthMetric.RECOVERY) }
+        }
     }
 }
 

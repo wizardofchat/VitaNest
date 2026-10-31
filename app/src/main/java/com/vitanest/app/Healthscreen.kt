@@ -3,6 +3,9 @@ package com.vitanest.app
 // © 2026 Sumeet Garg — VitaNest
 // HealthScreen — Whoop dashboard: recovery ring, metrics, sleep, workout, date nav
 // Updated: analytics link row added below vitals ☘️
+// Updated 30 Oct 2026: device-neutral — missing shared metrics show "—";
+//          Whoop-only tiles (recovery, strain, sleep score/efficiency,
+//          skin temp, disturbances) are hidden when null (Garmin days)
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -45,6 +48,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.vitanest.app.data.remote.WhoopResponse
+import com.vitanest.app.data.remote.presentOrNull
 import com.vitanest.app.data.repository.VitaClawRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -190,15 +194,25 @@ fun HealthScreen(
                         Spacer(Modifier.height(16.dp))
                     }
 
-                    HealthSectionLabel("Sleep")
-                    SleepCardsRow(data)
-                    Spacer(Modifier.height(10.dp))
-                    SleepStagesCard(data)
-                    Spacer(Modifier.height(16.dp))
+                    val hasSleepCards  = data.sleepPerformance.presentOrNull() != null ||
+                                         data.sleepEfficiency.presentOrNull() != null
+                    val hasSleepStages = data.remMin.presentOrNull() != null ||
+                                         data.deepMin.presentOrNull() != null
+                    if (hasSleepCards || hasSleepStages) {
+                        HealthSectionLabel("Sleep")
+                        if (hasSleepCards) {
+                            SleepCardsRow(data)
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        if (hasSleepStages) {
+                            SleepStagesCard(data)
+                            Spacer(Modifier.height(16.dp))
+                        }
+                        HorizontalDivider(color = LightRule, thickness = 0.5.dp,
+                            modifier = Modifier.padding(horizontal = 20.dp))
+                        Spacer(Modifier.height(16.dp))
+                    }
 
-                    HorizontalDivider(color = LightRule, thickness = 0.5.dp,
-                        modifier = Modifier.padding(horizontal = 20.dp))
-                    Spacer(Modifier.height(16.dp))
                     HealthSectionLabel("Vitals")
                     VitalsRow(data)
                     Spacer(Modifier.height(16.dp))
@@ -367,14 +381,19 @@ private fun RecoverySection(data: WhoopResponse) {
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        RecoveryRing(score = data.recoveryScore)
+        // Whoop-only: ring and strain tile are hidden when null
+        data.recoveryScore.presentOrNull()?.let { RecoveryRing(score = it) }
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier            = Modifier.weight(1f)
         ) {
-            MetricTile(value = "%.1f ms".format(data.hrvRmssdMilli), label = "HRV",        dotColor = GreenDark)
-            MetricTile(value = "%.1f".format(data.strain),           label = "Strain",     dotColor = AmberWarm)
-            MetricTile(value = "%.0f bpm".format(data.restingHeartRate), label = "Resting HR", dotColor = MidGrey)
+            MetricTile(value = data.hrvRmssdMilli.presentOrNull()?.let { "%.1f ms".format(it) } ?: "—",
+                label = "HRV", dotColor = GreenDark)
+            data.strain.presentOrNull()?.let {
+                MetricTile(value = "%.1f".format(it), label = "Strain", dotColor = AmberWarm)
+            }
+            MetricTile(value = data.restingHeartRate.presentOrNull()?.let { "%.0f bpm".format(it) } ?: "—",
+                label = "Resting HR", dotColor = MidGrey)
         }
     }
 }
@@ -455,8 +474,13 @@ private fun WorkoutCard(data: WhoopResponse) {
             Text(data.lastWorkout.replaceFirstChar { it.uppercase() },
                 fontSize = 20.sp, fontWeight = FontWeight.Medium,
                 fontFamily = FontFamily.Serif, color = NearBlack)
-            Text("Strain %.1f  ·  SpO₂ %.1f%%".format(data.strain, data.spo2Percentage),
-                fontSize = 11.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
+            val subline = listOfNotNull(
+                data.strain.presentOrNull()?.let { "Strain %.1f".format(it) },
+                data.spo2Percentage.presentOrNull()?.let { "SpO₂ %.1f%%".format(it) }
+            ).joinToString("  ·  ")
+            if (subline.isNotEmpty()) {
+                Text(subline, fontSize = 11.sp, color = MidGrey, fontFamily = FontFamily.SansSerif)
+            }
         }
         Box(
             modifier = Modifier
@@ -494,22 +518,27 @@ private fun SleepCardsRow(data: WhoopResponse) {
             .padding(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        val perfPill = when {
-            data.sleepPerformance >= 85 -> Triple("Excellent", PillGreenBg, PillGreenTxt)
-            data.sleepPerformance >= 70 -> Triple("Good",      PillGreenBg, PillGreenTxt)
-            data.sleepPerformance >= 50 -> Triple("Fair",      PillAmberBg, PillAmberTxt)
-            else                        -> Triple("Poor",      PillRedBg,   PillRedTxt)
+        // Each card is shown only when its value exists (both are Whoop-only)
+        data.sleepPerformance.presentOrNull()?.let { perf ->
+            val perfPill = when {
+                perf >= 85 -> Triple("Excellent", PillGreenBg, PillGreenTxt)
+                perf >= 70 -> Triple("Good",      PillGreenBg, PillGreenTxt)
+                perf >= 50 -> Triple("Fair",      PillAmberBg, PillAmberTxt)
+                else       -> Triple("Poor",      PillRedBg,   PillRedTxt)
+            }
+            SleepCard(modifier = Modifier.weight(1f), label = "Sleep score",
+                value = "%.0f".format(perf), pill = perfPill)
         }
-        SleepCard(modifier = Modifier.weight(1f), label = "Sleep score",
-            value = "%.0f".format(data.sleepPerformance), pill = perfPill)
 
-        val effPill = when {
-            data.sleepEfficiency >= 90 -> Triple("Efficient",  PillGreenBg, PillGreenTxt)
-            data.sleepEfficiency >= 75 -> Triple("Good",       PillGreenBg, PillGreenTxt)
-            else                       -> Triple("Below goal", PillAmberBg, PillAmberTxt)
+        data.sleepEfficiency.presentOrNull()?.let { eff ->
+            val effPill = when {
+                eff >= 90 -> Triple("Efficient",  PillGreenBg, PillGreenTxt)
+                eff >= 75 -> Triple("Good",       PillGreenBg, PillGreenTxt)
+                else      -> Triple("Below goal", PillAmberBg, PillAmberTxt)
+            }
+            SleepCard(modifier = Modifier.weight(1f), label = "Efficiency",
+                value = "%.1f%%".format(eff), pill = effPill)
         }
-        SleepCard(modifier = Modifier.weight(1f), label = "Efficiency",
-            value = "%.1f%%".format(data.sleepEfficiency), pill = effPill)
     }
 }
 
@@ -546,12 +575,14 @@ private fun SleepCard(
 
 @Composable
 private fun SleepStagesCard(data: WhoopResponse) {
-    val knownMin = data.remMin + data.deepMin
-    val lightMin = maxOf(0f, 480f - knownMin - (data.disturbances * 5f)).coerceAtMost(480f)
+    val rem      = data.remMin  ?: 0f
+    val deep     = data.deepMin ?: 0f
+    val knownMin = rem + deep
+    val lightMin = maxOf(0f, 480f - knownMin - ((data.disturbances ?: 0) * 5f)).coerceAtMost(480f)
     val stages   = listOf(
-        Triple("REM",   data.remMin,  GreenDark),
-        Triple("Deep",  data.deepMin, GreenDeep),
-        Triple("Light", lightMin,     MidGrey)
+        Triple("REM",   rem,      GreenDark),
+        Triple("Deep",  deep,     GreenDeep),
+        Triple("Light", lightMin, MidGrey)
     )
     val total = stages.sumOf { it.second.toDouble() }.toFloat().coerceAtLeast(1f)
 
@@ -570,8 +601,10 @@ private fun SleepStagesCard(data: WhoopResponse) {
             verticalAlignment = Alignment.CenterVertically) {
             Text("Sleep stages", fontSize = 13.sp, color = MidGrey,
                 fontFamily = FontFamily.SansSerif)
-            Text("${data.disturbances} disturbances", fontSize = 11.sp,
-                color = MidGrey, fontFamily = FontFamily.SansSerif)
+            data.disturbances?.let {   // Whoop-only; 0 is a real Whoop value
+                Text("$it disturbances", fontSize = 11.sp,
+                    color = MidGrey, fontFamily = FontFamily.SansSerif)
+            }
         }
         stages.forEach { (label, minutes, color) ->
             SleepStageBar(label = label, minutes = minutes,
@@ -611,9 +644,11 @@ private fun VitalsRow(data: WhoopResponse) {
     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         VitalCard(modifier = Modifier.weight(1f), label = "SpO₂",
-            value = "%.1f%%".format(data.spo2Percentage))
-        VitalCard(modifier = Modifier.weight(1f), label = "Skin temp",
-            value = "%.1f°C".format(data.skinTempCelsius))
+            value = data.spo2Percentage.presentOrNull()?.let { "%.1f%%".format(it) } ?: "—")
+        data.skinTempCelsius.presentOrNull()?.let {   // Whoop-only
+            VitalCard(modifier = Modifier.weight(1f), label = "Skin temp",
+                value = "%.1f°C".format(it))
+        }
     }
 }
 

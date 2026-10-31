@@ -38,17 +38,18 @@ fun PulseDetailScreen(
             if (result.isSuccess) {
                 val w = result.getOrNull()!!
                 metrics = metrics.copy(
-                    recovery         = w.recoveryScore,
-                    hrv              = w.hrvRmssdMilli,
-                    rhr              = w.restingHeartRate,
-                    spo2             = w.spo2Percentage,
-                    skinTemp         = w.skinTempCelsius,
-                    strain           = w.strain,
-                    sleepPerformance = w.sleepPerformance,
-                    sleepEfficiency  = w.sleepEfficiency,
-                    remMin           = w.remMin,
-                    deepMin          = w.deepMin,
-                    disturbances     = w.disturbances,
+                    // null (Garmin day) → 0, which this screen treats as missing
+                    recovery         = w.recoveryScore    ?: 0f,
+                    hrv              = w.hrvRmssdMilli    ?: 0f,
+                    rhr              = w.restingHeartRate ?: 0f,
+                    spo2             = w.spo2Percentage   ?: 0f,
+                    skinTemp         = w.skinTempCelsius  ?: 0f,
+                    strain           = w.strain           ?: 0f,
+                    sleepPerformance = w.sleepPerformance ?: 0f,
+                    sleepEfficiency  = w.sleepEfficiency  ?: 0f,
+                    remMin           = w.remMin           ?: 0f,
+                    deepMin          = w.deepMin          ?: 0f,
+                    disturbances     = w.disturbances     ?: 0,
                     lastWorkout      = w.lastWorkout
                 )
                 lastUpdated = w.lastUpdated
@@ -109,13 +110,18 @@ fun PulseDetailScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                InkRecoveryRing(percentage = metrics.recovery)
-                Spacer(modifier = Modifier.width(32.dp))
+                // Whoop-only: ring and skin temp hidden when missing (Garmin days)
+                if (metrics.recovery > 0f) {
+                    InkRecoveryRing(percentage = metrics.recovery)
+                    Spacer(modifier = Modifier.width(32.dp))
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     InkMetricRow("HRV",       if (metrics.hrv > 0f) "${"%.1f".format(metrics.hrv)} ms" else "—")
                     InkMetricRow("RHR",       if (metrics.rhr > 0f) "${metrics.rhr.toInt()} bpm" else "—")
                     InkMetricRow("SpO2",      if (metrics.spo2 > 0f) "${"%.1f".format(metrics.spo2)}%" else "—")
-                    InkMetricRow("Skin temp", if (metrics.skinTemp > 0f) "${"%.1f".format(metrics.skinTemp)}°C" else "—")
+                    if (metrics.skinTemp > 0f) {
+                        InkMetricRow("Skin temp", "${"%.1f".format(metrics.skinTemp)}°C")
+                    }
                 }
             }
 
@@ -123,31 +129,42 @@ fun PulseDetailScreen(
             HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
             Spacer(modifier = Modifier.height(T.sectionGap))
 
-            // ── Activity & Sleep — pending VitaClaw extension ─
-            Text(text = "ACTIVITY & SLEEP", style = T.sectionHead)
-            Spacer(modifier = Modifier.height(16.dp))
+            // ── Activity & Sleep — all three are Whoop-only scores ─
+            val hasStrain = metrics.strain > 0f
+            val hasPerf   = metrics.sleepPerformance > 0f
+            val hasEff    = metrics.sleepEfficiency > 0f
+            if (hasStrain || hasPerf || hasEff) {
+                Text(text = "ACTIVITY & SLEEP", style = T.sectionHead)
+                Spacer(modifier = Modifier.height(16.dp))
 
-            InkBarRow(
-                label = "Day strain",
-                value = if (metrics.strain > 0f) "${metrics.strain} / 21" else "—",
-                fraction = (metrics.strain / 21f).coerceIn(0f, 1f)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            InkBarRow(
-                label = "Sleep performance",
-                value = if (metrics.sleepPerformance > 0f) "${metrics.sleepPerformance.toInt()}%" else "—",
-                fraction = (metrics.sleepPerformance / 100f).coerceIn(0f, 1f)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            InkBarRow(
-                label = "Sleep efficiency",
-                value = if (metrics.sleepEfficiency > 0f) "${metrics.sleepEfficiency.toInt()}%" else "—",
-                fraction = (metrics.sleepEfficiency / 100f).coerceIn(0f, 1f)
-            )
+                if (hasStrain) {
+                    InkBarRow(
+                        label = "Day strain",
+                        value = "${metrics.strain} / 21",
+                        fraction = (metrics.strain / 21f).coerceIn(0f, 1f)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                if (hasPerf) {
+                    InkBarRow(
+                        label = "Sleep performance",
+                        value = "${metrics.sleepPerformance.toInt()}%",
+                        fraction = (metrics.sleepPerformance / 100f).coerceIn(0f, 1f)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                if (hasEff) {
+                    InkBarRow(
+                        label = "Sleep efficiency",
+                        value = "${metrics.sleepEfficiency.toInt()}%",
+                        fraction = (metrics.sleepEfficiency / 100f).coerceIn(0f, 1f)
+                    )
+                }
 
-            Spacer(modifier = Modifier.height(T.sectionGap))
-            HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
-            Spacer(modifier = Modifier.height(T.sectionGap))
+                Spacer(modifier = Modifier.height(T.sectionGap))
+                HorizontalDivider(thickness = T.ruleThickness, color = T.Rule)
+                Spacer(modifier = Modifier.height(T.sectionGap))
+            }
 
             // ── Sleep detail ──────────────────────────────────
             Row(

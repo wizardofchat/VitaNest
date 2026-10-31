@@ -107,7 +107,7 @@ fun HomeScreen(
     }
     val bladeAlphas = listOf(blade0Alpha, blade1Alpha, blade2Alpha)
 
-    val recoveryScore = whoopData?.recoveryScore ?: 0f
+    val recoveryScore = whoopData?.recoveryScore.presentOrNull() ?: 0f   // null on Garmin days → empty arc
     val arcAnim by animateFloatAsState(
         targetValue   = recoveryScore,
         animationSpec = tween(300, easing = EaseOutCubic),
@@ -344,11 +344,12 @@ private fun TurbineCanvas(
             }),
             Pair("Health", buildString {
                 whoopData?.let { w ->
-                    if (w.hrvRmssdMilli > 0f) append("HRV ${"%.0f".format(w.hrvRmssdMilli)}")
-                    if (w.sleepPerformance > 0f) {
+                    w.hrvRmssdMilli.presentOrNull()?.let { append("HRV ${"%.0f".format(it)}") }
+                    w.sleepPerformance.presentOrNull()?.let {   // Whoop-only
                         if (isNotEmpty()) append("  ")
-                        append("Sleep ${w.sleepPerformance.toInt()}%")
+                        append("Sleep ${it.toInt()}%")
                     }
+                    if (isEmpty()) append("—")
                 } ?: append("—")
             })
         )
@@ -442,8 +443,14 @@ private fun TurbineCanvas(
             modifier            = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val score = if ((whoopData?.recoveryScore ?: 0f) > 0f)
-                "${whoopData!!.recoveryScore.toInt()}" else "—"
+            // Whoop day: recovery. Garmin day (no recovery): HRV in ms.
+            val rec = whoopData?.recoveryScore.presentOrNull()
+            val hrv = whoopData?.hrvRmssdMilli.presentOrNull()
+            val (score, hubLabel) = when {
+                rec != null -> "${rec.toInt()}" to "RECOVERY"
+                hrv != null -> "${hrv.toInt()}" to "HRV MS"
+                else        -> "—" to "HEALTH"
+            }
             Text(
                 text       = score,
                 fontFamily = T.Serif,
@@ -452,7 +459,7 @@ private fun TurbineCanvas(
                 color      = T.Ink
             )
             Text(
-                text          = "RECOVERY",
+                text          = hubLabel,
                 fontSize      = 7.sp,
                 fontWeight    = FontWeight.Medium,
                 color         = T.Muted,
